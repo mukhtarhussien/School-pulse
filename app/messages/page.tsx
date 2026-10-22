@@ -92,7 +92,7 @@ export default async function Messages({ searchParams }: { searchParams: Promise
   const canCompose = Boolean(selectedContact) && (threadRows.length === 0 || connected)
   const chatCards = recentChats.slice()
   if (selectedContact && !chatCards.some(chat => chat.id === selectedContact.id)) {
-    chatCards.unshift({ id: selectedContact.id, name: selectedContact.fullNameAr, photoUrl: photoUrl(selectedContact.id, selectedContact.preferences?.profilePhotoKey), preview: 'ابدأ محادثة جديدة' })
+    chatCards.unshift({ id: selectedContact.id, name: selectedContact.nameAr, photoUrl: photoUrl(selectedContact.id, selectedContact.preferences?.profilePhotoKey), preview: 'ابدأ محادثة جديدة' })
   }
   const blockedUsers = blockedIds.length
     ? await db.select({ id: users.id, name: users.fullNameAr, email: users.email })
@@ -124,12 +124,12 @@ export default async function Messages({ searchParams }: { searchParams: Promise
         <div className="messages-sidebar-footer"><span className="messages-secure-dot"/> مراسلات المدرسة الخاصة</div>
       </aside>
 
-      <section className="messages-chat-panel" aria-label={selectedContact ? `محادثة مع ${selectedContact.fullNameAr}` : 'محادثة'}>
+      <section className="messages-chat-panel" aria-label={selectedContact ? `محادثة مع ${selectedContact.nameAr}` : 'محادثة'}>
         {selectedContact ? <>
           <header className="messages-chat-header">
             <Link className="messages-back-button" href="/messages?list=1" aria-label="العودة للمحادثات"><ArrowRight size={19}/></Link>
-            <span className="messages-person-avatar">{selectedContact.preferences?.profilePhotoKey ? <img src={photoUrl(selectedContact.id, selectedContact.preferences.profilePhotoKey)} alt=""/> : selectedContact.fullNameAr.slice(0, 1)}</span>
-            <div className="messages-person-info"><strong>{selectedContact.fullNameAr}</strong><small>{connected ? 'محادثة خاصة' : 'من حسابات المدرسة'}</small></div>
+            <span className="messages-person-avatar">{selectedContact.preferences?.profilePhotoKey ? <img src={photoUrl(selectedContact.id, selectedContact.preferences.profilePhotoKey)} alt=""/> : selectedContact.nameAr.slice(0, 1)}</span>
+            <div className="messages-person-info"><strong>{selectedContact.nameAr}</strong><small>{connected ? 'محادثة خاصة' : 'من حسابات المدرسة'}</small></div>
             <form action={toggleBlockedUserAction} className="chat-block-form"><input type="hidden" name="userId" value={selectedContact.id}/><input type="hidden" name="intent" value="block"/><button className="messages-icon-button" type="submit" aria-label="حظر الحساب" title="حظر الحساب"><Ban size={17}/></button></form>
           </header>
 
@@ -141,7 +141,7 @@ export default async function Messages({ searchParams }: { searchParams: Promise
                 return <article className={`chat-message ${sentByMe ? 'sent' : 'received'}`} key={row.id}>
                   <div className="chat-bubble"><p>{row.body}</p><div className="chat-message-meta"><time dateTime={row.createdAt.toISOString()}>{row.createdAt.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}</time>{sentByMe && row.status === 'pending' && <span>طلب تواصل</span>}{sentByMe && (row.status === 'accepted' || row.status === 'read') && <CheckCheck size={14} aria-label="تم الإرسال"/>}</div></div>
                 </article>
-              }) : <div className="messages-empty-state"><span><MessageCircle size={24}/></span><h2>بداية حكاية جديدة</h2><p>اكتب أول رسالة إلى {selectedContact.fullNameAr}.</p></div>}
+              }) : <div className="messages-empty-state"><span><MessageCircle size={24}/></span><h2>بداية حكاية جديدة</h2><p>اكتب أول رسالة إلى {selectedContact.nameAr}.</p></div>}
             </ChatHistory>
           </div>
 
