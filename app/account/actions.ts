@@ -14,14 +14,22 @@ export async function saveAccountAction(fd: FormData) {
   const fullNameAr = value(fd, 'fullNameAr')
   const fullNameEn = value(fd, 'fullNameEn')
   const phone = value(fd, 'phone')
+  const username = value(fd, 'username').toLowerCase()
   if (fullNameAr.length < 3 || fullNameAr.length > 160) throw new Error('INVALID_NAME')
   if (fullNameEn.length < 2 || fullNameEn.length > 160) throw new Error('INVALID_NAME_EN')
   if (phone.length > 40) throw new Error('INVALID_PHONE')
+  if (username && !/^[a-z0-9._-]{5,32}$/.test(username)) throw new Error('INVALID_USERNAME')
+
+  if (username && username !== user.username) {
+    const [existing] = await requireDb().select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1)
+    if (existing) throw new Error('USERNAME_TAKEN')
+  }
 
   await requireDb().update(users).set({
     fullNameAr,
     fullNameEn,
     phone: phone || null,
+    username: username || null,
     updatedAt: new Date(),
   }).where(eq(users.id, user.id))
 

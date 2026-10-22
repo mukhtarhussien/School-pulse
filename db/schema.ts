@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm'
 import {
   boolean,
+  check,
   date,
   integer,
   jsonb,
@@ -225,6 +226,7 @@ export const users = pgTable(
         'users_student_number_idx'
       ).on(t.studentNumber),
     usernameIdx: uniqueIndex('users_username_idx').on(t.username),
+    usernameMinLengthCheck: check('users_username_min_length_check', sql`${t.username} is null or char_length(${t.username}) >= 5`),
   })
 )
 
@@ -1328,7 +1330,10 @@ export const registrationRequests =
       ),
 
       ...timestamps,
-    }
+    },
+    (t) => ({
+      usernameMinLengthCheck: check('registration_requests_username_min_length_check', sql`${t.username} is null or char_length(${t.username}) >= 5`),
+    })
   )
 
 export const loginAttempts =

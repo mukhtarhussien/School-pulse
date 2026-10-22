@@ -25,6 +25,7 @@ export async function submitRegistrationAction(fd: FormData) {
   const fullName = normalizeFullName(value(fd, 'fullName'))
   const birthDate = value(fd, 'birthDate')
   const phone = normalizePhone(value(fd, 'phone'))
+  const rawUsername = value(fd, 'username').toLowerCase()
   const classId = value(fd, 'classId')
   const subjectId = value(fd, 'subjectId')
   const requestedRole = request.requestedRole === 'teacher' ? 'teacher' : 'student'
@@ -39,6 +40,7 @@ export async function submitRegistrationAction(fd: FormData) {
   if (!isValidTripleName(fullName)) redirect('/register?error=name')
   if (!validBirthDate(birthDate)) redirect('/register?error=birth_date')
   if (!isValidIraqiPhone(phone)) redirect('/register?error=phone')
+  if (rawUsername && !/^[a-z0-9._-]{5,32}$/.test(rawUsername)) redirect(`/register?role=${requestedRole}&error=username`)
 
   const database = requireDb()
   if (requestedRole === 'teacher') {
@@ -51,12 +53,20 @@ export async function submitRegistrationAction(fd: FormData) {
 
   const [existingPhone] = await database.select({ id: users.id }).from(users).where(eq(users.phone, phone)).limit(1)
   if (existingPhone) redirect(`/register?role=${requestedRole}&error=phone_taken`)
+  if (rawUsername) {
+    const [existingUsername] = await database.select({ id: users.id }).from(users).where(eq(users.username, rawUsername)).limit(1)
+    if (existingUsername) redirect(`/register?role=${requestedRole}&error=username_taken`)
+    const [pendingUsername] = await database.select({ id: registrationRequests.id }).from(registrationRequests)
+      .where(and(eq(registrationRequests.username, rawUsername), eq(registrationRequests.status, 'pending'))).limit(1)
+    if (pendingUsername) redirect(`/register?role=${requestedRole}&error=username_taken`)
+  }
   const [duplicatePhone] = await database.select({ id: registrationRequests.id }).from(registrationRequests)
     .where(and(eq(registrationRequests.phone, phone), eq(registrationRequests.status, 'pending'))).limit(1)
   if (duplicatePhone) redirect(`/register?role=${requestedRole}&error=phone_pending`)
 
   await database.update(registrationRequests).set({
     requestedRole,
+    username: rawUsername || null,
     fullName,
     birthDate,
     phone,
@@ -103,7 +113,7 @@ export async function submitPasswordRegistrationAction(fd: FormData) {
   if (role === 'teacher' && !subjectId) redirect(`/register?${roleQuery}&error=subject`)
   if (!rawUsername && !email && !phone) redirect(`/register?${roleQuery}&error=identifier`)
   if (role === 'admin' && !email) redirect(`/register?${roleQuery}&error=email_required`)
-  if (rawUsername && !/^[a-z0-9._-]{3,32}$/.test(rawUsername)) redirect(`/register?${roleQuery}&error=username`)
+  if (rawUsername && !/^[a-z0-9._-]{5,32}$/.test(rawUsername)) redirect(`/register?${roleQuery}&error=username`)
   if (email && (email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) redirect(`/register?${roleQuery}&error=email`)
   if (role === 'teacher' && !phone) redirect(`/register?${roleQuery}&error=phone`)
   if (phone && !isValidIraqiPhone(phone)) redirect(`/register?${roleQuery}&error=phone`)

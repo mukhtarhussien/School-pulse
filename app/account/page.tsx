@@ -43,7 +43,7 @@ export default async function Account() {
         <label className="admin-field"><span>الاسم الكامل بالعربي</span><input name="fullNameAr" defaultValue={user.fullNameAr} autoComplete="name" minLength={3} maxLength={160} required /></label>
         <label className="admin-field"><span>الاسم بالإنكليزي</span><input name="fullNameEn" defaultValue={user.fullNameEn} autoComplete="name" minLength={2} maxLength={160} required /></label>
         <label className="admin-field"><span>رقم الهاتف</span><input name="phone" type="tel" defaultValue={user.phone ?? ''} autoComplete="tel" maxLength={40} /></label>
-        {user.username && <label className="admin-field"><span>اسم المستخدم لتسجيل الدخول</span><input value={`@${user.username}`} readOnly aria-readonly="true" dir="ltr" /></label>}
+        <label className="admin-field"><span>اسم المستخدم للمراسلة (اختياري، 5 أحرف على الأقل)</span><input name="username" defaultValue={user.username ?? ''} autoComplete="username" minLength={5} maxLength={32} pattern="[A-Za-z0-9._-]{5,32}" dir="ltr" placeholder="student_name" /><small>استخدم 5 إلى 32 حرفًا أو رقمًا، أو اتركه فارغًا للبحث برقمك الطلابي.</small></label>
         <label className="admin-field"><span>البريد الإلكتروني</span><input value={contactEmail || 'لا يوجد بريد إلكتروني مرتبط'} readOnly aria-readonly="true" /></label>
         <button className="button button-primary" type="submit">حفظ التعديلات</button>
       </form>

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { asc, desc, eq, inArray, or } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
-import { ArrowRight, Ban, Check, CheckCheck, MessageCircle, Plus, Search, Send, ShieldCheck, UserRound, UserRoundX, X } from 'lucide-react'
+import { ArrowRight, Ban, Check, CheckCheck, MessageCircle, Search, Send, ShieldCheck, UserRound, UserRoundX, X } from 'lucide-react'
 import { redirect } from 'next/navigation'
 import { requireDb } from '@/db'
 import { messageRequests, users } from '@/db/schema'
@@ -24,7 +24,7 @@ function photoUrl(userId: string, key?: string) {
   return key ? `/api/profile-photo/${userId}?v=${encodeURIComponent(key)}` : ''
 }
 
-export default async function Messages({ searchParams }: { searchParams: Promise<{ result?: string; with?: string; list?: string }> }) {
+export default async function Messages({ searchParams }: { searchParams: Promise<{ result?: string; with?: string; list?: string; search?: string }> }) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
@@ -53,6 +53,8 @@ export default async function Messages({ searchParams }: { searchParams: Promise
     db.select({
       id: users.id,
       nameAr: users.fullNameAr,
+      username: users.username,
+      studentNumber: users.studentNumber,
       role: users.role,
       preferences: users.preferences,
     }).from(users).where(eq(users.isActive, true)).orderBy(asc(users.fullNameAr)),
@@ -64,6 +66,10 @@ export default async function Messages({ searchParams }: { searchParams: Promise
     ...contactRows.filter(contact => contact.preferences?.blockedUserIds?.includes(user.id)).map(contact => contact.id),
   ])
   const contacts = contactRows.filter(contact => contact.id !== user.id && !unavailableIds.has(contact.id))
+  const searchTerm = params.search?.trim().toLowerCase() ?? ''
+  const matchingContact = searchTerm
+    ? contacts.find(contact => contact.username?.toLowerCase() === searchTerm || contact.studentNumber?.toLowerCase() === searchTerm)
+    : undefined
   const visibleRows = rows.filter(row => {
     const otherId = row.senderId === user.id ? row.recipientId : row.senderId
     return !unavailableIds.has(otherId)
@@ -77,7 +83,7 @@ export default async function Messages({ searchParams }: { searchParams: Promise
     recentByContact.set(otherId, { id: otherId, name, photoUrl: photoUrl(otherId, preferences?.profilePhotoKey), preview: row.body })
   }
   const recentChats = [...recentByContact.values()]
-  const selectedContact = params.list
+  const selectedContact = params.list || searchTerm
     ? undefined
     : contacts.find(contact => contact.id === params.with)
       ?? contacts.find(contact => contact.id === recentChats[0]?.id)
@@ -111,13 +117,20 @@ export default async function Messages({ searchParams }: { searchParams: Promise
         </header>
 
         <form method="get" action="/messages" className="messages-new-chat">
-          <label className="sr-only" htmlFor="chat-contact-select">ابدأ محادثة مع</label>
-          <select id="chat-contact-select" name="with" defaultValue={selectedId} required>
-            <option value="" disabled>ابدأ محادثة مع...</option>
-            {contacts.map(contact => <option value={contact.id} key={contact.id}>{contact.nameAr} · {contact.role === 'teacher' ? 'مدرس' : contact.role === 'admin' ? 'إدارة' : 'طالب'}</option>)}
-          </select>
-          <button type="submit" aria-label="محادثة جديدة" title="محادثة جديدة"><Plus size={20}/></button>
+          <input type="hidden" name="list" value="1"/>
+          <label className="sr-only" htmlFor="message-user-search">ابحث باسم المستخدم أو الرقم الطلابي</label>
+          <input id="message-user-search" name="search" type="search" dir="ltr" minLength={5} maxLength={60} defaultValue={params.search ?? ''} placeholder="اسم المستخدم أو الرقم الطلابي" required/>
+          <button type="submit" aria-label="البحث عن حساب" title="البحث عن حساب"><Search size={18}/></button>
         </form>
+
+        {searchTerm && <section className="messages-search-result" aria-live="polite" aria-label="نتيجة البحث">
+          <span className="messages-search-result-label">نتيجة البحث</span>
+          {matchingContact ? <Link href={`/messages?with=${matchingContact.id}`} className="messages-search-account">
+            <span className="messages-contact-avatar">{matchingContact.preferences?.profilePhotoKey ? <img src={photoUrl(matchingContact.id, matchingContact.preferences.profilePhotoKey)} alt=""/> : matchingContact.nameAr.slice(0, 1)}</span>
+            <span><strong>{matchingContact.nameAr}</strong><small>{matchingContact.username ? `@${matchingContact.username}` : 'حساب مرتبط بالرقم الطلابي'} · {matchingContact.role === 'teacher' ? 'مدرس' : matchingContact.role === 'admin' ? 'إدارة' : 'طالب'}</small></span>
+            <span className="messages-search-account-action">مراسلة</span>
+          </Link> : <p className="messages-search-no-result">ما لقينا حسابًا بهذا الاسم أو الرقم.</p>}
+        </section>}
 
         <div className="messages-list-heading"><span>المحادثات الأخيرة</span><span>{chatCards.length}</span></div>
         <MessagesContactList contacts={chatCards} selectedId={selectedId}/>

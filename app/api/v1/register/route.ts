@@ -104,7 +104,7 @@ export async function POST(request: Request) {
     username = String(body.username || '').trim().toLowerCase() || null
     const password = typeof body.password === 'string' ? body.password : ''
     const passwordConfirm = typeof body.passwordConfirm === 'string' ? body.passwordConfirm : ''
-    if (username && !/^[a-z0-9._-]{3,32}$/.test(username)) return apiError('invalid_username', 'اسم المستخدم يجب أن يكون من 3 إلى 32 رمزًا إنجليزيًا.', 400)
+    if (username && !/^[a-z0-9._-]{5,32}$/.test(username)) return apiError('invalid_username', 'اسم المستخدم يجب أن يكون من 5 إلى 32 رمزًا إنجليزيًا.', 400)
     if (password || passwordConfirm) {
       if (password.length < 8 || !/[A-Za-z\p{L}]/u.test(password) || !/\d/.test(password)) return apiError('weak_password', 'استخدم 8 أحرف على الأقل مع رقم.', 400)
       if (password !== passwordConfirm) return apiError('password_mismatch', 'كلمتا المرور غير متطابقتين.', 400)
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
     const passwordConfirm = typeof body.passwordConfirm === 'string' ? body.passwordConfirm : ''
     if (role === 'teacher' && !requestedEmail) return apiError('identifier_required', 'أدخل البريد الإلكتروني للمدرس.', 400)
     if (!username && !requestedEmail && !phone) return apiError('identifier_required', 'أدخل رقم الهاتف أو اسم المستخدم أو البريد الإلكتروني.', 400)
-    if (username && !/^[a-z0-9._-]{3,32}$/.test(username)) return apiError('invalid_username', 'اسم المستخدم يجب أن يكون من 3 إلى 32 رمزًا إنجليزيًا.', 400)
+    if (username && !/^[a-z0-9._-]{5,32}$/.test(username)) return apiError('invalid_username', 'اسم المستخدم يجب أن يكون من 5 إلى 32 رمزًا إنجليزيًا.', 400)
     if (requestedEmail && (requestedEmail.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedEmail))) return apiError('invalid_email', 'البريد الإلكتروني غير صالح.', 400)
     if (password.length < 8 || !/[A-Za-z\p{L}]/u.test(password) || !/\d/.test(password)) return apiError('weak_password', 'استخدم 8 أحرف على الأقل مع رقم.', 400)
     if (password !== passwordConfirm) return apiError('password_mismatch', 'كلمتا المرور غير متطابقتين.', 400)

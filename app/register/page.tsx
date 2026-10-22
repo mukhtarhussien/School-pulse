@@ -18,7 +18,7 @@ function errorMessage(error: string | undefined) {
     email: 'البريد الإلكتروني غير صالح.',
     email_required: 'البريد الإلكتروني مطلوب لحساب الإدارة.',
     email_taken: 'البريد الإلكتروني مرتبط بطلب أو حساب موجود.',
-    username: 'اسم المستخدم من 3 إلى 32 حرفًا أو رقمًا، ويمكن استخدام النقطة والشرطة.',
+    username: 'اسم المستخدم من 5 إلى 32 حرفًا أو رقمًا، ويمكن استخدام النقطة والشرطة.',
     username_taken: 'اسم المستخدم مرتبط بطلب أو حساب موجود.',
     identifier: 'أدخل رقم الهاتف أو اسم المستخدم أو البريد الإلكتروني.',
     password: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل وتحتوي حرفًا ورقمًا.',
@@ -71,7 +71,7 @@ export default async function RegisterPage({
         {role === 'student' && <label>الصف<select name="classId" required defaultValue=""><option value="">اختر الصف</option>{classesRows.map((item) => <option key={item.id} value={item.id}>{item.nameAr} · المرحلة {item.gradeLevel}{item.section ? ` · ${item.section}` : ''}</option>)}</select></label>}
         {role === 'teacher' && <label>الاختصاص / المادة<select name="subjectId" required defaultValue=""><option value="">اختر المادة</option>{subjectsRows.map((item) => <option key={item.id} value={item.id}>{item.nameAr} · {item.code}</option>)}</select></label>}
         <div className="registration-identifier-heading"><strong>بيانات الدخول</strong><span>{role === 'admin' ? 'استخدم بريد Google نفسه عند الدخول بعد الموافقة' : 'يكفي إدخال واحد منها على الأقل'}</span></div>
-        {role !== 'admin' && <label>اسم المستخدم (اختياري)<input name="username" autoComplete="username" minLength={3} maxLength={32} pattern="[A-Za-z0-9._-]{3,32}" dir="ltr" placeholder="student_name" /></label>}
+        {role !== 'admin' && <label>اسم المستخدم (اختياري)<input name="username" autoComplete="username" minLength={5} maxLength={32} pattern="[A-Za-z0-9._-]{5,32}" dir="ltr" placeholder="student_name" /></label>}
         <label>البريد الإلكتروني {role === 'admin' ? '' : '(اختياري)'}<input name="email" type="email" autoComplete="email" dir="ltr" placeholder="name@example.com" required={role === 'admin'} /></label>
         <label>رقم الهاتف {role === 'teacher' ? '' : '(اختياري)'}<input name="phone" type="tel" inputMode="tel" autoComplete="tel" dir="ltr" placeholder="07xxxxxxxxx" required={role === 'teacher'} /></label>
         <label>كلمة المرور<input name="password" type="password" autoComplete="new-password" minLength={8} required /></label>
@@ -146,6 +146,7 @@ export default async function RegisterPage({
       <label>الاسم الثلاثي<input name="fullName" defaultValue={request.fullName ?? request.googleName ?? ''} autoComplete="name" required /></label>
       <label>تاريخ الميلاد<input name="birthDate" type="date" required /></label>
       <label>رقم الهاتف<input name="phone" type="tel" inputMode="tel" placeholder="07xxxxxxxxx" autoComplete="tel" required /></label>
+      <label>اسم المستخدم (اختياري)<input name="username" autoComplete="username" minLength={5} maxLength={32} pattern="[A-Za-z0-9._-]{5,32}" dir="ltr" placeholder="student_name" /></label>
       {isTeacher ? <label>الاختصاص / المادة<select name="subjectId" required defaultValue={request.subjectId ?? ''}><option value="">اختر المادة</option>{subjectsRows.map((item) => <option key={item.id} value={item.id}>{item.nameAr} · {item.code}</option>)}</select></label> : <label>الصف<select name="classId" required defaultValue={request.classId ?? ''}><option value="">اختر الصف</option>{classesRows.map((item) => <option key={item.id} value={item.id}>{item.nameAr} · المرحلة {item.gradeLevel}{item.section ? ` · ${item.section}` : ''}</option>)}</select></label>}
       <button className="button button-primary" type="submit">إرسال طلب التسجيل إلى الإدارة</button>
     </form>
