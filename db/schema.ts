@@ -5,6 +5,7 @@ import {
   date,
   integer,
   jsonb,
+  index,
   pgEnum,
   pgTable,
   real,
@@ -18,8 +19,13 @@ import {
 export const userRole = pgEnum('user_role', [
   'student',
   'teacher',
+  'school_admin',
   'admin',
 ])
+
+export const communityScope = pgEnum('community_scope', ['school', 'platform'])
+export const messageChannel = pgEnum('message_channel', ['school', 'social'])
+export const schoolInviteRole = pgEnum('school_invite_role', ['student', 'teacher', 'school_admin'])
 
 export const audience = pgEnum('audience', [
   'all',
@@ -84,9 +90,19 @@ const timestamps = {
     .notNull(),
 }
 
+export const schools = pgTable('schools', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  slug: varchar('slug', { length: 100 }).notNull().unique(),
+  nameAr: varchar('name_ar', { length: 180 }).notNull(),
+  nameEn: varchar('name_en', { length: 180 }).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  ...timestamps,
+})
+
 export const classes = pgTable(
   'classes',
   {
+    schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
     id: uuid('id')
       .defaultRandom()
       .primaryKey(),
@@ -114,19 +130,24 @@ export const classes = pgTable(
     capacity: integer('capacity'),
 
     ...timestamps,
-  }
+  },
+  (t) => ({ schoolIdx: index('classes_school_idx').on(t.schoolId, t.gradeLevel, t.section) })
 )
 
 export type UserPreferences = {
   notificationsMuted?: boolean
   blockedUserIds?: string[]
   profilePhotoKey?: string
-  appearance?: { fontFamily: string; fontSize: number; cardSize: 'small' | 'medium' | 'large' }
+  language?: 'ar' | 'ckb' | 'en'
+  socialEnabled?: boolean
+  socialMessageAudience?: 'contacts' | 'school' | 'platform'
+  appearance?: { fontFamily: string; fontSize: number; cardSize: 'small' | 'medium' | 'large'; accentColor?: string; theme?: 'light' | 'dark' | 'system' }
 }
 
 export const users = pgTable(
   'users',
   {
+    schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'set null' }),
     id: uuid('id')
       .defaultRandom()
       .primaryKey(),
@@ -226,8 +247,26 @@ export const users = pgTable(
         'users_student_number_idx'
       ).on(t.studentNumber),
     usernameIdx: uniqueIndex('users_username_idx').on(t.username),
+    schoolRoleIdx: index('users_school_role_idx').on(t.schoolId, t.role, t.isActive),
     usernameMinLengthCheck: check('users_username_min_length_check', sql`${t.username} is null or char_length(${t.username}) >= 5`),
   })
+)
+
+export const schoolInvites = pgTable(
+  'school_invites',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
+    role: schoolInviteRole('role').notNull(),
+    codeHash: varchar('code_hash', { length: 64 }).notNull().unique(),
+    maxUses: integer('max_uses').default(1).notNull(),
+    uses: integer('uses').default(0).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    ...timestamps,
+  },
+  (t) => ({ schoolIdx: index('school_invites_school_idx').on(t.schoolId, t.role, t.expiresAt) }),
 )
 
 export const teachers = pgTable(
@@ -278,15 +317,14 @@ export const teachers = pgTable(
 export const subjects = pgTable(
   'subjects',
   {
+    schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
     id: uuid('id')
       .defaultRandom()
       .primaryKey(),
 
     code: varchar('code', {
       length: 40,
-    })
-      .notNull()
-      .unique(),
+    }).notNull(),
 
     nameAr: varchar('name_ar', {
       length: 120,
@@ -301,13 +339,18 @@ export const subjects = pgTable(
     }),
 
     ...timestamps,
-  }
+  },
+  (t) => ({
+    schoolCodeUnique: uniqueIndex('subjects_school_code_idx').on(t.schoolId, t.code),
+    schoolIdx: index('subjects_school_idx').on(t.schoolId, t.nameAr),
+  })
 )
 
 export const teachingAssignments =
   pgTable(
     'teaching_assignments',
     {
+      schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
       id: uuid('id')
         .defaultRandom()
         .primaryKey(),
@@ -364,6 +407,7 @@ export const teachingAssignments =
 export const assessments = pgTable(
   'assessments',
   {
+    schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
     id: uuid('id')
       .defaultRandom()
       .primaryKey(),
@@ -428,12 +472,14 @@ export const assessments = pgTable(
       .notNull(),
 
     ...timestamps,
-  }
+  },
+  (t) => ({ schoolIdx: index('assessments_school_idx').on(t.schoolId, t.classId, t.createdAt) })
 )
 
 export const grades = pgTable(
   'grades',
   {
+    schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
     id: uuid('id')
       .defaultRandom()
       .primaryKey(),
@@ -491,6 +537,7 @@ export const grades = pgTable(
         t.assessmentId,
         t.studentId
       ),
+    schoolStudentIdx: index('grades_school_student_idx').on(t.schoolId, t.studentId, t.gradedAt),
   })
 )
 
@@ -498,6 +545,7 @@ export const announcements =
   pgTable(
     'announcements',
     {
+      schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
       id: uuid('id')
         .defaultRandom()
         .primaryKey(),
@@ -562,12 +610,14 @@ export const announcements =
       ),
 
       ...timestamps,
-    }
+    },
+    (t) => ({ schoolIdx: index('announcements_school_idx').on(t.schoolId, t.published, t.publishedAt) })
   )
 
 export const assignments = pgTable(
   'assignments',
   {
+    schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
     id: uuid('id')
       .defaultRandom()
       .primaryKey(),
@@ -640,12 +690,14 @@ export const assignments = pgTable(
       .notNull(),
 
     ...timestamps,
-  }
+  },
+  (t) => ({ schoolIdx: index('assignments_school_idx').on(t.schoolId, t.classId, t.dueAt) })
 )
 
 export const files = pgTable(
   'files',
   {
+    schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
     id: uuid('id')
       .defaultRandom()
       .primaryKey(),
@@ -690,13 +742,15 @@ export const files = pgTable(
       .notNull(),
 
     ...timestamps,
-  }
+  },
+  (t) => ({ schoolIdx: index('files_school_idx').on(t.schoolId, t.visibility, t.createdAt) })
 )
 
 export const assignmentSubmissions =
   pgTable(
     'assignment_submissions',
     {
+      schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
       id: uuid('id')
         .defaultRandom()
         .primaryKey(),
@@ -760,6 +814,7 @@ export const calendarEvents =
   pgTable(
     'calendar_events',
     {
+      schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
       id: uuid('id')
         .defaultRandom()
         .primaryKey(),
@@ -835,13 +890,16 @@ export const calendarEvents =
       ),
 
       ...timestamps,
-    }
+    },
+    (t) => ({ schoolIdx: index('calendar_events_school_idx').on(t.schoolId, t.startsAt) })
   )
 
 export const messageRequests =
   pgTable(
     'message_requests',
     {
+      schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+      channel: messageChannel('channel').default('school').notNull(),
       id: uuid('id')
         .defaultRandom()
         .primaryKey(),
@@ -899,13 +957,19 @@ export const messageRequests =
           withTimezone: true,
         }
       ),
-    }
+    },
+    (t) => ({
+      channelSchoolCheck: check('message_requests_channel_school_check', sql`(${t.channel} = 'school' and ${t.schoolId} is not null) or ${t.channel} = 'social'`),
+      schoolChannelIdx: index('messages_school_channel_idx').on(t.schoolId, t.channel, t.createdAt),
+    })
   )
 
 export const communityPosts =
   pgTable(
     'community_posts',
     {
+      schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+      scope: communityScope('scope').default('school').notNull(),
       id: uuid('id')
         .defaultRandom()
         .primaryKey(),
@@ -944,7 +1008,12 @@ export const communityPosts =
         .notNull(),
 
       ...timestamps,
-    }
+    },
+    (t) => ({
+      scopeSchoolCheck: check('community_posts_scope_school_check', sql`(${t.scope} = 'school' and ${t.schoolId} is not null) or (${t.scope} = 'platform' and ${t.schoolId} is null)`),
+      feedIdx: index('community_posts_feed_idx').on(t.scope, t.schoolId, t.published, t.pinned, t.createdAt),
+      authorIdx: index('community_posts_author_idx').on(t.authorId, t.createdAt),
+    })
   )
 
 export const communityComments =
@@ -1034,6 +1103,7 @@ export const communityPostVotes =
 export const rules = pgTable(
   'rules',
   {
+    schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
     id: uuid('id')
       .defaultRandom()
       .primaryKey(),
@@ -1080,6 +1150,7 @@ export const notifications =
   pgTable(
     'notifications',
     {
+      schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
       id: uuid('id')
         .defaultRandom()
         .primaryKey(),
@@ -1137,6 +1208,7 @@ export const schoolLocations =
   pgTable(
     'school_locations',
     {
+      schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
       id: uuid('id')
         .defaultRandom()
         .primaryKey(),
@@ -1187,6 +1259,7 @@ export const attendanceRecords =
   pgTable(
     'attendance_records',
     {
+      schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
       id: uuid('id')
         .defaultRandom()
         .primaryKey(),
@@ -1223,7 +1296,8 @@ export const attendanceRecords =
       ),
 
       ...timestamps,
-    }
+    },
+    (t) => ({ schoolStudentIdx: index('attendance_school_student_idx').on(t.schoolId, t.studentId, t.date) })
   )
 
 export const siteSettings =
@@ -1248,6 +1322,8 @@ export const registrationRequests =
   pgTable(
     'registration_requests',
     {
+      schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+      inviteId: uuid('invite_id').references(() => schoolInvites.id, { onDelete: 'set null' }),
       id: uuid('id')
         .defaultRandom()
         .primaryKey(),
@@ -1333,6 +1409,8 @@ export const registrationRequests =
     },
     (t) => ({
       usernameMinLengthCheck: check('registration_requests_username_min_length_check', sql`${t.username} is null or char_length(${t.username}) >= 5`),
+      schoolStatusCheck: check('registration_requests_school_status_check', sql`(${t.status} = 'draft' and ${t.schoolId} is null) or (${t.status} <> 'draft' and ${t.schoolId} is not null)`),
+      schoolStatusIdx: index('registrations_school_status_idx').on(t.schoolId, t.status, t.createdAt),
     })
   )
 

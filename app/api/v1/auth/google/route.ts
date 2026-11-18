@@ -4,8 +4,6 @@ import { users } from '@/db/schema'
 import { apiError, apiJson, createApiSession, getSiteBaseUrl, readJson, safeUser } from '@/lib/api/v1'
 import { getClientIp, isRequestFlooded } from '@/lib/security'
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
 
 type GoogleTokenInfo = {
   aud?: string

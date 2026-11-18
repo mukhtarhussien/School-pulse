@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { requireDb } from '@/db'
 import { messageRequests, users } from '@/db/schema'
 import { getCurrentUser } from '@/lib/auth'
+import { isSocialEnabled, socialMessageAudience } from '@/lib/tenant'
 
 const value = (fd: FormData, key: string) => String(fd.get(key) ?? '').trim()
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -22,11 +23,18 @@ export async function sendPrivateMessageAction(fd: FormData) {
   }
 
   const db = requireDb()
-  const [recipient] = await db.select({ id: users.id, preferences: users.preferences })
+  const [recipient] = await db.select({ id: users.id, schoolId: users.schoolId, role: users.role, isActive: users.isActive, preferences: users.preferences })
     .from(users)
     .where(and(eq(users.id, recipientId), eq(users.isActive, true)))
     .limit(1)
   if (!recipient) redirect('/messages?result=unavailable')
+  const sameSchool = Boolean(user.schoolId && recipient.schoolId && user.schoolId === recipient.schoolId)
+  const channel = sameSchool ? 'school' : 'social'
+  const recipientAudience = socialMessageAudience({ ...recipient, preferences: recipient.preferences })
+  if (!sameSchool) {
+    if (!user.schoolId || !['student', 'teacher'].includes(user.role) || !['student', 'teacher'].includes(recipient.role) || !isSocialEnabled(user) || recipient.preferences?.socialEnabled === false) redirect('/messages?result=unavailable')
+    if (recipientAudience === 'school') redirect('/messages?result=unavailable')
+  }
 
   const senderBlockedIds = Array.isArray(user.preferences?.blockedUserIds) ? user.preferences.blockedUserIds : []
   const recipientBlockedIds = Array.isArray(recipient.preferences?.blockedUserIds) ? recipient.preferences.blockedUserIds : []
@@ -42,6 +50,7 @@ export async function sendPrivateMessageAction(fd: FormData) {
     .from(messageRequests)
     .where(and(relationship, inArray(messageRequests.status, ['accepted', 'read'])))
     .limit(1)
+  if (!sameSchool && recipientAudience === 'contacts' && !acceptedConversation) redirect('/messages?result=unavailable')
 
   if (!acceptedConversation) {
     const [declinedRequest] = await db.select({ id: messageRequests.id })
@@ -56,6 +65,8 @@ export async function sendPrivateMessageAction(fd: FormData) {
   }
 
   await db.insert(messageRequests).values({
+    schoolId: sameSchool ? user.schoolId : null,
+    channel,
     senderId: user.id,
     recipientId,
     subject: subject || null,
@@ -78,7 +89,13 @@ export async function respondToMessageRequestAction(fd: FormData) {
     redirect('/messages?result=invalid')
   }
 
-  await requireDb().update(messageRequests)
+  const database = requireDb()
+  const [pending] = await database.select({ channel: messageRequests.channel, schoolId: messageRequests.schoolId }).from(messageRequests).where(and(
+    eq(messageRequests.id, requestId), eq(messageRequests.recipientId, user.id), eq(messageRequests.status, 'pending'),
+  )).limit(1)
+  if (!pending || (pending.channel === 'school' && pending.schoolId !== user.schoolId) || (pending.channel === 'social' && !isSocialEnabled(user))) redirect('/messages?result=unavailable')
+
+  await database.update(messageRequests)
     .set({ status: intent === 'accept' ? 'accepted' : 'rejected' })
     .where(and(
       eq(messageRequests.id, requestId),

@@ -5,8 +5,6 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { getCurrentUser } from '@/lib/auth'
 import { APP_STORAGE_BUCKET, APK_CONTENT_TYPE, getObjectStorageClient } from '@/lib/object-storage'
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
   const user = await getCurrentUser()

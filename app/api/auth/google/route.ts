@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { beginGoogleOAuth, googleConfigured } from '@/lib/google'
 
-export const runtime = 'nodejs'
 
 const WINDOW_MS = 60_000
 const MAX_REQUESTS = 10

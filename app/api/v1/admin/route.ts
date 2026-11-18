@@ -4,12 +4,11 @@ import { requireDb } from '@/db'
 import {
   announcements, assessments, assignments, attendanceRecords, calendarEvents, classes,
   communityPosts, files, grades, notifications, registrationRequests, rules,
-  schoolLocations, siteSettings, subjects, teachers, teachingAssignments, users,
+  schoolLocations, siteSettings, subjects, teachers, teachingAssignments, users, schools,
 } from '@/db/schema'
 import { hashPassword } from '@/lib/auth'
 import { apiError, apiJson, getApiSession, readJson } from '@/lib/api/v1'
 
-export const dynamic = 'force-dynamic'
 const str = (body: Record<string, unknown>, key: string) => String(body[key] ?? '').trim()
 const num = (body: Record<string, unknown>, key: string, fallback = 0) => Number.isFinite(Number(body[key])) ? Number(body[key]) : fallback
 const date = (body: Record<string, unknown>, key: string) => { const value = str(body, key); const parsed = value ? new Date(value) : null; return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null }
@@ -53,6 +52,12 @@ export async function POST(request: Request) {
   if (!body) return apiError('invalid_json', 'صيغة الطلب غير صالحة.', 400)
   const db = requireDb()
   const action = str(body, 'action')
+  const requestedSchoolId = str(body, 'schoolId') || undefined
+  const [school] = requestedSchoolId
+    ? await db.select({ id: schools.id }).from(schools).where(eq(schools.id, requestedSchoolId)).limit(1)
+    : await db.select({ id: schools.id }).from(schools).orderBy(schools.createdAt).limit(1)
+  if (!school) return apiError('school_not_found', 'المدرسة المطلوبة غير موجودة.', 404)
+  const schoolId = school.id
   const required = (...keys: string[]) => keys.every(key => str(body, key).length > 0)
 
   if (action === 'createAnnouncement') {
@@ -60,41 +65,41 @@ export async function POST(request: Request) {
     const audience = str(body, 'audience') || 'all'
     if (!['all', 'students', 'teachers', 'admins', 'class'].includes(audience)) return apiError('invalid_audience', 'الجمهور غير صالح.', 400)
     const published = body.published !== false && body.published !== 'false'
-    await db.insert(announcements).values({ titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), bodyAr: str(body, 'bodyAr'), bodyEn: str(body, 'bodyEn'), audience: audience as 'all' | 'students' | 'teachers' | 'admins' | 'class', classId: str(body, 'classId') || null, published, publishedAt: published ? new Date() : null, authorId: admin.id })
+    await db.insert(announcements).values({ schoolId, titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), bodyAr: str(body, 'bodyAr'), bodyEn: str(body, 'bodyEn'), audience: audience as 'all' | 'students' | 'teachers' | 'admins' | 'class', classId: str(body, 'classId') || null, published, publishedAt: published ? new Date() : null, authorId: admin.id })
   } else if (action === 'createClass') {
     if (!required('nameAr', 'nameEn')) return apiError('invalid_input', 'أدخل اسم الصف باللغتين.', 400)
-    await db.insert(classes).values({ nameAr: str(body, 'nameAr'), nameEn: str(body, 'nameEn'), gradeLevel: num(body, 'gradeLevel'), section: str(body, 'section') || null, room: str(body, 'room') || null, capacity: num(body, 'capacity') || null })
+    await db.insert(classes).values({ schoolId, nameAr: str(body, 'nameAr'), nameEn: str(body, 'nameEn'), gradeLevel: num(body, 'gradeLevel'), section: str(body, 'section') || null, room: str(body, 'room') || null, capacity: num(body, 'capacity') || null })
   } else if (action === 'createSubject') {
     if (!required('code', 'nameAr', 'nameEn')) return apiError('invalid_input', 'أكمل كود المادة واسمها باللغتين.', 400)
-    await db.insert(subjects).values({ code: str(body, 'code'), nameAr: str(body, 'nameAr'), nameEn: str(body, 'nameEn'), color: str(body, 'color') || null })
+    await db.insert(subjects).values({ schoolId, code: str(body, 'code'), nameAr: str(body, 'nameAr'), nameEn: str(body, 'nameEn'), color: str(body, 'color') || null })
   } else if (action === 'createUser') {
     const role = str(body, 'role')
     if (!['student', 'teacher'].includes(role) || !required('email', 'password', 'fullNameAr', 'fullNameEn', 'code') || (role === 'student' && !str(body, 'classId'))) return apiError('invalid_input', 'أكمل معلومات الحساب والصف للطالب.', 400)
-    const [user] = await db.insert(users).values({ email: str(body, 'email').toLowerCase(), passwordHash: hashPassword(str(body, 'password')), fullNameAr: str(body, 'fullNameAr'), fullNameEn: str(body, 'fullNameEn'), role: role as 'student' | 'teacher', studentNumber: role === 'student' ? str(body, 'code') : null, phone: str(body, 'phone') || null, classId: role === 'student' ? str(body, 'classId') || null : null }).returning({ id: users.id })
+    const [user] = await db.insert(users).values({ schoolId, email: str(body, 'email').toLowerCase(), passwordHash: hashPassword(str(body, 'password')), fullNameAr: str(body, 'fullNameAr'), fullNameEn: str(body, 'fullNameEn'), role: role as 'student' | 'teacher', studentNumber: role === 'student' ? str(body, 'code') : null, phone: str(body, 'phone') || null, classId: role === 'student' ? str(body, 'classId') || null : null }).returning({ id: users.id })
     if (role === 'teacher') await db.insert(teachers).values({ userId: user.id, employeeCode: str(body, 'code'), department: str(body, 'department') || null, titleAr: str(body, 'titleAr') || null, titleEn: str(body, 'titleEn') || null })
   } else if (action === 'createEvent') {
     const startsAt = date(body, 'startsAt')
     if (!required('titleAr', 'titleEn') || !startsAt) return apiError('invalid_input', 'أدخل عنوان الحدث وموعده.', 400)
-    await db.insert(calendarEvents).values({ titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), descriptionAr: str(body, 'descriptionAr') || null, descriptionEn: str(body, 'descriptionEn') || null, startsAt, endsAt: date(body, 'endsAt'), location: str(body, 'location') || null, classId: str(body, 'classId') || null, subjectId: str(body, 'subjectId') || null, createdBy: admin.id })
+    await db.insert(calendarEvents).values({ schoolId, titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), descriptionAr: str(body, 'descriptionAr') || null, descriptionEn: str(body, 'descriptionEn') || null, startsAt, endsAt: date(body, 'endsAt'), location: str(body, 'location') || null, classId: str(body, 'classId') || null, subjectId: str(body, 'subjectId') || null, createdBy: admin.id })
   } else if (action === 'createAssignment') {
     const dueAt = date(body, 'dueAt')
     if (!required('titleAr', 'titleEn', 'subjectId', 'classId') || !dueAt) return apiError('invalid_input', 'أكمل بيانات الواجب وموعد التسليم.', 400)
-    await db.insert(assignments).values({ titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), descriptionAr: str(body, 'descriptionAr') || null, descriptionEn: str(body, 'descriptionEn') || null, subjectId: str(body, 'subjectId'), classId: str(body, 'classId'), teacherId: str(body, 'teacherId') || null, dueAt, published: body.published !== false && body.published !== 'false', maxScore: num(body, 'maxScore', 100) })
+    await db.insert(assignments).values({ schoolId, titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), descriptionAr: str(body, 'descriptionAr') || null, descriptionEn: str(body, 'descriptionEn') || null, subjectId: str(body, 'subjectId'), classId: str(body, 'classId'), teacherId: str(body, 'teacherId') || null, dueAt, published: body.published !== false && body.published !== 'false', maxScore: num(body, 'maxScore', 100) })
   } else if (action === 'createAssessment') {
     if (!required('titleAr', 'titleEn', 'subjectId', 'classId')) return apiError('invalid_input', 'أكمل بيانات التقييم.', 400)
     const type = str(body, 'type') || 'exam'
     if (!['exam', 'quiz', 'assignment', 'project', 'participation'].includes(type)) return apiError('invalid_type', 'نوع التقييم غير صالح.', 400)
-    await db.insert(assessments).values({ titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), type: type as 'exam' | 'quiz' | 'assignment' | 'project' | 'participation', subjectId: str(body, 'subjectId'), classId: str(body, 'classId'), examOrder: num(body, 'examOrder') || null, maxScore: num(body, 'maxScore', 100), startsAt: date(body, 'startsAt'), published: body.published === true || body.published === 'true' })
+    await db.insert(assessments).values({ schoolId, titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), type: type as 'exam' | 'quiz' | 'assignment' | 'project' | 'participation', subjectId: str(body, 'subjectId'), classId: str(body, 'classId'), examOrder: num(body, 'examOrder') || null, maxScore: num(body, 'maxScore', 100), startsAt: date(body, 'startsAt'), published: body.published === true || body.published === 'true' })
   } else if (action === 'upsertGrade') {
     const score = num(body, 'score', Number.NaN)
     if (!required('assessmentId', 'studentId') || !Number.isFinite(score)) return apiError('invalid_input', 'حدد التقييم والطالب والدرجة.', 400)
     const [existing] = await db.select({ id: grades.id }).from(grades).where(and(eq(grades.assessmentId, str(body, 'assessmentId')), eq(grades.studentId, str(body, 'studentId')))).limit(1)
     const values = { score, feedback: str(body, 'feedback') || null, gradedBy: admin.id, gradedAt: new Date() }
     if (existing) await db.update(grades).set(values).where(eq(grades.id, existing.id))
-    else await db.insert(grades).values({ assessmentId: str(body, 'assessmentId'), studentId: str(body, 'studentId'), ...values })
+    else await db.insert(grades).values({ schoolId, assessmentId: str(body, 'assessmentId'), studentId: str(body, 'studentId'), ...values })
   } else if (action === 'assignTeacher') {
     if (!required('teacherId', 'subjectId', 'classId', 'academicYear', 'semester')) return apiError('invalid_input', 'أكمل بيانات توزيع المدرس.', 400)
-    await db.insert(teachingAssignments).values({ teacherId: str(body, 'teacherId'), subjectId: str(body, 'subjectId'), classId: str(body, 'classId'), academicYear: str(body, 'academicYear'), semester: str(body, 'semester') })
+    await db.insert(teachingAssignments).values({ schoolId, teacherId: str(body, 'teacherId'), subjectId: str(body, 'subjectId'), classId: str(body, 'classId'), academicYear: str(body, 'academicYear'), semester: str(body, 'semester') })
   } else if (action === 'bulkGrades') {
     const lines = str(body, 'csv').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
     let saved = 0
@@ -107,7 +112,7 @@ export async function POST(request: Request) {
       const [existing] = await db.select({ id: grades.id }).from(grades).where(and(eq(grades.assessmentId, assessmentId), eq(grades.studentId, student.id))).limit(1)
       const values = { score, feedback: feedback.join(',') || null, gradedBy: admin.id, gradedAt: new Date() }
       if (existing) await db.update(grades).set(values).where(eq(grades.id, existing.id))
-      else await db.insert(grades).values({ assessmentId, studentId: student.id, ...values })
+      else await db.insert(grades).values({ schoolId, assessmentId, studentId: student.id, ...values })
       saved++
     }
     return apiJson({ saved })
@@ -115,24 +120,24 @@ export async function POST(request: Request) {
     if (!required('titleAr', 'titleEn', 'bodyAr', 'bodyEn')) return apiError('invalid_input', 'أكمل محتوى الإشعار.', 400)
     const audience = str(body, 'audience')
     const targets = audience === 'students' || audience === 'teachers' ? await db.select({ id: users.id }).from(users).where(eq(users.role, audience === 'students' ? 'student' : 'teacher')) : await db.select({ id: users.id }).from(users)
-    if (targets.length) await db.insert(notifications).values(targets.map(target => ({ userId: target.id, titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), bodyAr: str(body, 'bodyAr'), bodyEn: str(body, 'bodyEn') })))
+    if (targets.length) await db.insert(notifications).values(targets.map(target => ({ schoolId, userId: target.id, titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), bodyAr: str(body, 'bodyAr'), bodyEn: str(body, 'bodyEn') })))
   } else if (action === 'createRule') {
     if (!required('titleAr', 'titleEn', 'bodyAr', 'bodyEn')) return apiError('invalid_input', 'أكمل نص القاعدة باللغتين.', 400)
-    await db.insert(rules).values({ titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), bodyAr: str(body, 'bodyAr'), bodyEn: str(body, 'bodyEn'), sortOrder: num(body, 'sortOrder'), published: body.published !== false })
+    await db.insert(rules).values({ schoolId, titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), bodyAr: str(body, 'bodyAr'), bodyEn: str(body, 'bodyEn'), sortOrder: num(body, 'sortOrder'), published: body.published !== false })
   } else if (action === 'createNotification') {
     if (!required('titleAr', 'titleEn', 'bodyAr', 'bodyEn')) return apiError('invalid_input', 'أكمل بيانات الإشعار.', 400)
-    await db.insert(notifications).values({ userId: str(body, 'userId') || null, titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), bodyAr: str(body, 'bodyAr'), bodyEn: str(body, 'bodyEn') })
+    await db.insert(notifications).values({ schoolId, userId: str(body, 'userId') || null, titleAr: str(body, 'titleAr'), titleEn: str(body, 'titleEn'), bodyAr: str(body, 'bodyAr'), bodyEn: str(body, 'bodyEn') })
   } else if (action === 'createAttendance') {
     const at = date(body, 'date')
     const status = str(body, 'status')
     if (!required('studentId') || !at || !['present', 'late', 'absent', 'excused'].includes(status)) return apiError('invalid_input', 'تحقق من بيانات الحضور.', 400)
-    await db.insert(attendanceRecords).values({ studentId: str(body, 'studentId'), date: at, status: status as 'present' | 'late' | 'absent' | 'excused', note: str(body, 'note') || null, recordedBy: admin.id })
+    await db.insert(attendanceRecords).values({ schoolId, studentId: str(body, 'studentId'), date: at, status: status as 'present' | 'late' | 'absent' | 'excused', note: str(body, 'note') || null, recordedBy: admin.id })
   } else if (action === 'createLocation') {
     if (!required('nameAr', 'nameEn')) return apiError('invalid_input', 'أدخل اسم الموقع باللغتين.', 400)
-    await db.insert(schoolLocations).values({ nameAr: str(body, 'nameAr'), nameEn: str(body, 'nameEn'), descriptionAr: str(body, 'descriptionAr') || null, descriptionEn: str(body, 'descriptionEn') || null, latitude: body.latitude == null ? null : num(body, 'latitude'), longitude: body.longitude == null ? null : num(body, 'longitude'), mapX: body.mapX == null ? null : num(body, 'mapX'), mapY: body.mapY == null ? null : num(body, 'mapY'), icon: str(body, 'icon') || null })
+    await db.insert(schoolLocations).values({ schoolId, nameAr: str(body, 'nameAr'), nameEn: str(body, 'nameEn'), descriptionAr: str(body, 'descriptionAr') || null, descriptionEn: str(body, 'descriptionEn') || null, latitude: body.latitude == null ? null : num(body, 'latitude'), longitude: body.longitude == null ? null : num(body, 'longitude'), mapX: body.mapX == null ? null : num(body, 'mapX'), mapY: body.mapY == null ? null : num(body, 'mapY'), icon: str(body, 'icon') || null })
   } else if (action === 'createFile') {
     if (!required('name', 'url')) return apiError('invalid_input', 'أدخل اسم الملف ورابطه.', 400)
-    await db.insert(files).values({ ownerId: str(body, 'ownerId') || admin.id, name: str(body, 'name'), url: str(body, 'url'), mimeType: str(body, 'mimeType') || null, sizeBytes: num(body, 'sizeBytes') || null, folder: str(body, 'folder') || null, visibility: (str(body, 'visibility') || 'all') as 'all' | 'students' | 'teachers' | 'admins' | 'class' })
+    await db.insert(files).values({ schoolId, ownerId: str(body, 'ownerId') || admin.id, name: str(body, 'name'), url: str(body, 'url'), mimeType: str(body, 'mimeType') || null, sizeBytes: num(body, 'sizeBytes') || null, folder: str(body, 'folder') || null, visibility: (str(body, 'visibility') || 'all') as 'all' | 'students' | 'teachers' | 'admins' | 'class' })
   } else if (action === 'toggleUser') {
     const id = str(body, 'id')
     if (!id || id === admin.id) return apiError('invalid_user', 'الحساب غير صالح.', 400)
@@ -147,14 +152,15 @@ export async function POST(request: Request) {
     const [registration] = await db.select().from(registrationRequests).where(and(eq(registrationRequests.id, id), eq(registrationRequests.status, 'pending'))).limit(1)
     if (!registration) return apiError('not_found', 'طلب التسجيل غير موجود.', 404)
     if (action === 'approveRegistration') {
-      const role: 'teacher' | 'student' | 'admin' = registration.requestedRole === 'teacher' || registration.requestedRole === 'admin' ? registration.requestedRole : 'student'
-      if (!registration.fullName || !registration.birthDate || (role === 'student' && !registration.classId) || (role === 'teacher' && !registration.subjectId) || (role === 'admin' && !registration.email.includes('@'))) return apiError('invalid_registration', 'بيانات الطلب غير مكتملة.', 400)
-      const matches: Array<{ id: string; role: 'student' | 'teacher' | 'admin'; studentNumber: string | null } | undefined> = []
+      const role: 'teacher' | 'student' | 'school_admin' | 'admin' = registration.requestedRole === 'teacher' || registration.requestedRole === 'school_admin' || registration.requestedRole === 'admin' ? registration.requestedRole : 'student'
+      if (!registration.fullName || (role === 'student' && (!registration.birthDate || !registration.classId)) || (role === 'teacher' && !registration.subjectId) || (role === 'admin' && !registration.email.includes('@')) || (role === 'school_admin' && !registration.inviteId)) return apiError('invalid_registration', 'بيانات الطلب غير مكتملة.', 400)
+      if (role !== 'admin' && !registration.schoolId) return apiError('invalid_registration', 'الطلب لا يرتبط بمدرسة.', 400)
+      const matches: Array<{ id: string; role: 'student' | 'teacher' | 'school_admin' | 'admin'; studentNumber: string | null } | undefined> = []
       if (registration.googleSubject) matches.push((await db.select({ id: users.id, role: users.role, studentNumber: users.studentNumber }).from(users).where(eq(users.googleSubject, registration.googleSubject)).limit(1))[0])
       matches.push((await db.select({ id: users.id, role: users.role, studentNumber: users.studentNumber }).from(users).where(eq(users.email, registration.email)).limit(1))[0])
       if (registration.username) matches.push((await db.select({ id: users.id, role: users.role, studentNumber: users.studentNumber }).from(users).where(eq(users.username, registration.username)).limit(1))[0])
       if (registration.phone) matches.push((await db.select({ id: users.id, role: users.role, studentNumber: users.studentNumber }).from(users).where(eq(users.phone, registration.phone)).limit(1))[0])
-      const identities = matches.filter((item) => Boolean(item)) as Array<{ id: string; role: 'student' | 'teacher' | 'admin'; studentNumber: string | null }>
+      const identities = matches.filter((item) => Boolean(item)) as Array<{ id: string; role: 'student' | 'teacher' | 'school_admin' | 'admin'; studentNumber: string | null }>
       if (new Set(identities.map((item) => item.id)).size > 1) return apiError('identity_conflict', 'بيانات الطلب مرتبطة بأكثر من حساب.', 409)
       const existing = identities[0]
       if (existing && existing.role !== role) return apiError('role_conflict', 'المعرّف مرتبط بنوع حساب آخر.', 409)
@@ -167,6 +173,7 @@ export async function POST(request: Request) {
         fullNameAr: registration.fullName,
         fullNameEn: registration.googleName || registration.fullName,
         role,
+        schoolId: registration.schoolId,
         studentNumber,
         phone: registration.phone,
         birthDate: registration.birthDate,
@@ -191,7 +198,7 @@ export async function POST(request: Request) {
           const academicYear = `${yearStart}-${yearStart + 1}`
           const semester = 'العام الدراسي'
           const [assignment] = await db.select({ id: teachingAssignments.id }).from(teachingAssignments).where(and(eq(teachingAssignments.teacherId, teacher.id), eq(teachingAssignments.subjectId, registration.subjectId), eq(teachingAssignments.classId, registration.classId), eq(teachingAssignments.academicYear, academicYear), eq(teachingAssignments.semester, semester))).limit(1)
-          if (!assignment) await db.insert(teachingAssignments).values({ teacherId: teacher.id, subjectId: registration.subjectId, classId: registration.classId, academicYear, semester })
+          if (!assignment) await db.insert(teachingAssignments).values({ schoolId: registration.schoolId!, teacherId: teacher.id, subjectId: registration.subjectId, classId: registration.classId, academicYear, semester })
         }
       }
       await db.update(registrationRequests).set({ status: 'approved', passwordHash: null, reviewedBy: admin.id, reviewedAt: new Date(), updatedAt: new Date() }).where(eq(registrationRequests.id, id))

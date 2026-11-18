@@ -5,8 +5,6 @@ import { createApiChallenge, createApiSession, apiError, apiJson, readJson, safe
 import { verifyPassword, hashPassword } from '@/lib/auth'
 import { checkPasswordLock, clearPasswordFailures, getClientIp, isRequestFlooded, normalizePhone, recordPasswordFailure } from '@/lib/security'
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
 
 const DUMMY_PASSWORD_HASH = hashPassword('school-pulse-dummy-password')
 

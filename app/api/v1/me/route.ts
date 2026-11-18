@@ -3,7 +3,6 @@ import { requireDb } from '@/db'
 import { users } from '@/db/schema'
 import { apiError, apiJson, getApiSession, getSiteBaseUrl, readJson, safeUser } from '@/lib/api/v1'
 
-export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   const auth = await getApiSession(request)
@@ -22,6 +21,11 @@ export async function PATCH(request: Request) {
   if (fullNameAr.length < 3 || fullNameAr.length > 160 || fullNameEn.length < 2 || fullNameEn.length > 160 || phone.length > 40) return apiError('invalid_profile', 'تحقق من الاسم ورقم الهاتف.', 400)
   const preferences = { ...auth.user.preferences }
   if (typeof input.notificationsMuted === 'boolean') preferences.notificationsMuted = input.notificationsMuted
+  if (typeof input.socialEnabled === 'boolean' && ['student', 'teacher'].includes(auth.user.role)) preferences.socialEnabled = input.socialEnabled
+  if (input.socialMessageAudience !== undefined) {
+    if (!['contacts', 'school', 'platform'].includes(String(input.socialMessageAudience))) return apiError('invalid_social_audience', 'اختيار جمهور الرسائل غير صالح.', 400)
+    if (['student', 'teacher'].includes(auth.user.role)) preferences.socialMessageAudience = input.socialMessageAudience as 'contacts' | 'school' | 'platform'
+  }
   if (input.appearance && typeof input.appearance === 'object') {
     const appearance = input.appearance as Record<string, unknown>
     const allowedFonts = ['noto-kufi-arabic', 'reem-kufi', 'amiri', 'el-messiri', 'cairo', 'tajawal', 'ibm-plex-sans-arabic', 'noto-sans-arabic']

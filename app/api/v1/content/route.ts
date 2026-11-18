@@ -3,7 +3,6 @@ import { requireDb } from '@/db'
 import { assessments, grades, rules, schoolLocations } from '@/db/schema'
 import { apiError, apiJson, getApiSession } from '@/lib/api/v1'
 
-export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   const auth = await getApiSession(request)
@@ -11,13 +10,13 @@ export async function GET(request: Request) {
   const db = requireDb()
   const [rulesRows, locations, assessmentRows] = await Promise.all([
     db.select({ id: rules.id, titleAr: rules.titleAr, titleEn: rules.titleEn, bodyAr: rules.bodyAr, bodyEn: rules.bodyEn, sortOrder: rules.sortOrder })
-      .from(rules).where(eq(rules.published, true)).orderBy(asc(rules.sortOrder)),
+      .from(rules).where(and(eq(rules.published, true), ...(auth.user.schoolId ? [eq(rules.schoolId, auth.user.schoolId)] : []))).orderBy(asc(rules.sortOrder)),
     db.select({ id: schoolLocations.id, nameAr: schoolLocations.nameAr, nameEn: schoolLocations.nameEn, descriptionAr: schoolLocations.descriptionAr, descriptionEn: schoolLocations.descriptionEn, latitude: schoolLocations.latitude, longitude: schoolLocations.longitude, mapX: schoolLocations.mapX, mapY: schoolLocations.mapY, icon: schoolLocations.icon })
-      .from(schoolLocations).orderBy(asc(schoolLocations.nameAr)),
+      .from(schoolLocations).where(auth.user.schoolId ? eq(schoolLocations.schoolId, auth.user.schoolId) : eq(schoolLocations.id, '00000000-0000-0000-0000-000000000000')).orderBy(asc(schoolLocations.nameAr)),
     auth.user.role === 'student'
       ? db.select({ id: assessments.id, titleAr: assessments.titleAr, titleEn: assessments.titleEn, examOrder: assessments.examOrder, score: grades.score, maxScore: assessments.maxScore })
         .from(assessments).leftJoin(grades, and(eq(grades.assessmentId, assessments.id), eq(grades.studentId, auth.user.id)))
-        .where(eq(assessments.published, true))
+        .where(and(eq(assessments.published, true), ...(auth.user.schoolId ? [eq(assessments.schoolId, auth.user.schoolId)] : [])))
       : Promise.resolve([]),
   ])
   const grouped = new Map<string, { id: string; titleAr: string; titleEn: string; examOrder: number; scoreTotal: number; count: number }>()

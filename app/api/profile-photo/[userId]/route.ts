@@ -8,8 +8,6 @@ import { getCurrentUser } from '@/lib/auth'
 import { getApiUser } from '@/lib/api/v1'
 import { APP_STORAGE_BUCKET, getObjectStorageClient } from '@/lib/object-storage'
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -20,11 +18,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ user
   const { userId } = await params
   if (!uuidPattern.test(userId)) return new NextResponse(null, { status: 404 })
 
-  const [profile] = await requireDb().select({ preferences: users.preferences })
+  const [profile] = await requireDb().select({ schoolId: users.schoolId, role: users.role, isActive: users.isActive, preferences: users.preferences })
     .from(users)
     .where(and(eq(users.id, userId), eq(users.isActive, true)))
     .limit(1)
   const objectKey = profile?.preferences?.profilePhotoKey
+  const sameSchool = Boolean(viewer.schoolId && profile?.schoolId && viewer.schoolId === profile.schoolId)
+  const socialPhotoAllowed = Boolean(
+    profile?.isActive && viewer.schoolId && profile.schoolId &&
+    ['student', 'teacher'].includes(viewer.role) && ['student', 'teacher'].includes(profile.role) &&
+    viewer.preferences?.socialEnabled !== false && profile.preferences?.socialEnabled !== false,
+  )
+  if (!profile || !profile.isActive || (viewer.role !== 'admin' && !sameSchool && !socialPhotoAllowed)) return new NextResponse(null, { status: 404 })
   if (!objectKey || !new RegExp(`^avatars/${userId}/[0-9a-f-]{36}\\.jpg$`, 'i').test(objectKey)) {
     return new NextResponse(null, { status: 404 })
   }

@@ -1,9 +1,8 @@
-import { desc, eq, inArray, or } from 'drizzle-orm'
+import { and, desc, eq, or } from 'drizzle-orm'
 import { requireDb } from '@/db'
 import { files, siteSettings } from '@/db/schema'
 import { apiError, apiJson, getApiSession, getSiteBaseUrl } from '@/lib/api/v1'
 
-export const dynamic = 'force-dynamic'
 
 function assetUrl(value: string, baseUrl: string) {
   try {
@@ -33,9 +32,9 @@ export async function GET(request: Request) {
       visibility: files.visibility,
       createdAt: files.createdAt,
       ownerId: files.ownerId,
-    }).from(files).where(or(
-      eq(files.ownerId, user.id),
-      inArrayVisibility(user.role),
+    }).from(files).where(and(
+      ...(user.schoolId ? [eq(files.schoolId, user.schoolId)] : []),
+      or(eq(files.ownerId, user.id), inArrayVisibility(user.role)),
     )).orderBy(desc(files.createdAt)).limit(100),
     db.select({ value: siteSettings.value }).from(siteSettings).where(eq(siteSettings.key, 'portal_logo_url')).limit(1),
   ])
@@ -75,7 +74,7 @@ export async function GET(request: Request) {
   })
 }
 
-function inArrayVisibility(role: 'student' | 'teacher' | 'admin') {
+function inArrayVisibility(role: 'student' | 'teacher' | 'school_admin' | 'admin') {
   const audience: 'students' | 'teachers' | 'admins' = role === 'student' ? 'students' : role === 'teacher' ? 'teachers' : 'admins'
   return or(eq(files.visibility, 'all'), eq(files.visibility, audience))
 }

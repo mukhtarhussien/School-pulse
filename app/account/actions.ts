@@ -38,6 +38,21 @@ export async function saveAccountAction(fd: FormData) {
   revalidatePath('/messages')
 }
 
+export async function saveSocialPreferencesAction(fd: FormData) {
+  const user = await getCurrentUser()
+  if (!user || !user.isActive || !['student', 'teacher'].includes(user.role)) throw new Error('UNAUTHORIZED')
+  const enabled = fd.get('socialEnabled') === 'on'
+  const audience = String(fd.get('socialMessageAudience') || 'platform')
+  if (!['contacts', 'school', 'platform'].includes(audience)) throw new Error('INVALID_AUDIENCE')
+  await requireDb().update(users).set({
+    preferences: { ...(user.preferences ?? {}), socialEnabled: enabled, socialMessageAudience: audience as 'contacts' | 'school' | 'platform' },
+    updatedAt: new Date(),
+  }).where(eq(users.id, user.id))
+  revalidatePath('/account')
+  revalidatePath('/community')
+  revalidatePath('/messages')
+}
+
 import {
   isAppearanceFontFamily,
   normalizeCardSize,

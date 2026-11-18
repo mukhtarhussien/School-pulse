@@ -1,24 +1,28 @@
-import type { Metadata, Viewport } from 'next'
-import './globals.css'
-import { AppShell } from '@/components/app-shell'
-import { MotionBootstrap } from '@/components/motion-bootstrap'
-import { db } from '@/db'
-import { siteSettings } from '@/db/schema'
-import { getCurrentUser } from '@/lib/auth'
+import type { Metadata } from "next";
+import { headers, cookies } from "next/headers";
+import { getCurrentUser } from "@/lib/auth";
+import { LOCALE_COOKIE, localeFromGeo, localeInfo, isLocale } from "@/lib/locale";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: 'مدرستي | School Portal',
-  description: 'بوابة مدرسية ثنائية اللغة للدرجات والواجبات والتواصل.',
-}
+  title: { default: "مدارس | بوابة الطالب", template: "%s | مدارس" },
+  description: "بوابة الطالب المدرسية — درجاتك، واجباتك، وحضورك في مكان واحد.",
+};
 
-export const viewport: Viewport = {
-  width: 'device-width',
-  initialScale: 1,
-}
+// Locale and session are derived from request headers/cookies at the root.
+// This app-wide request-time rendering is intentional with Cache Components.
+export const instant = false;
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const user = await getCurrentUser()
-  const rows = db ? await db.select().from(siteSettings).limit(50) : []
-  const settings = new Map(rows.map(row => [row.key, String((row.value as { value?: string })?.value ?? '')]))
-  return <html lang="ar" dir="rtl"><body><MotionBootstrap/><AppShell currentUser={user} portalLogoUrl={settings.get('portal_logo_url') || ''} portalNameAr={settings.get('portal_name_ar') || 'مدرستي'} portalNameEn={settings.get('portal_name_en') || 'School Portal'}>{children}</AppShell></body></html>
+  const [requestHeaders, cookieStore, user] = await Promise.all([headers(), cookies(), getCurrentUser()]);
+  const saved = cookieStore.get(LOCALE_COOKIE)?.value;
+  const locale = isLocale(saved) ? saved : isLocale(user?.preferences?.language) ? user.preferences.language : localeFromGeo(
+    requestHeaders.get('x-vercel-ip-country'), requestHeaders.get('x-vercel-ip-country-region'), requestHeaders.get('x-vercel-ip-city'),
+  );
+  const info = localeInfo[locale];
+  return (
+    <html lang={info.htmlLang} dir={info.dir}>
+      <body>{children}</body>
+    </html>
+  );
 }

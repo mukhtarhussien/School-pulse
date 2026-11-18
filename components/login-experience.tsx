@@ -1,45 +1,24 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { GraduationCap } from 'lucide-react'
-import { MotionToggle } from '@/components/motion-toggle'
+import { useState } from 'react'
+import { BookOpen, GraduationCap, ShieldCheck, UserRound, ArrowLeft, Sparkles } from 'lucide-react'
+import Link from 'next/link'
+import { loginAction } from '@/app/login/actions'
+import { startPreview } from '@/app/preview-actions'
 
-export function LoginExperience({ children, logoUrl, portalNameAr, portalNameEn }: {
-  children: React.ReactNode
-  logoUrl: string
-  portalNameAr: string
-  portalNameEn: string
-}) {
-  const [phase, setPhase] = useState<'checking' | 'welcome' | 'ready'>('checking')
+type Role = 'student' | 'teacher' | 'admin'
+const roles: { id: Role; title: string; detail: string; Icon: typeof BookOpen }[] = [
+  { id: 'student', title: 'الطالب', detail: 'درجاتك وواجباتك', Icon: GraduationCap },
+  { id: 'teacher', title: 'المدرس', detail: 'صفوفك وطلابك', Icon: BookOpen },
+  { id: 'admin', title: 'الإدارة', detail: 'إدارة المنصة', Icon: ShieldCheck },
+]
 
-  useEffect(() => {
-    const seen = window.localStorage.getItem('school-portal-welcome-seen') === 'yes'
-    const motionOff = window.localStorage.getItem('school-pulse-motion') === 'off'
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (seen || motionOff || reduced) {
-      setPhase('ready')
-      return
-    }
-    setPhase('welcome')
-    const timer = window.setTimeout(() => {
-      window.localStorage.setItem('school-portal-welcome-seen', 'yes')
-      setPhase('ready')
-    }, 1350)
-    return () => window.clearTimeout(timer)
-  }, [])
-
-  return <div className={'login-experience phase-' + phase}>
-    {phase === 'welcome' && <div className="welcome-splash" aria-live="polite">
-      <div className="welcome-mark">
-        {logoUrl ? <img src={logoUrl} alt={portalNameAr} /> : <GraduationCap size={30} strokeWidth={1.6} />}
-      </div>
-      <p className="welcome-kicker">{portalNameEn}</p>
-      <h1>{'أهلًا بك'}</h1>
-      <p className="welcome-name">{portalNameAr}</p>
-    </div>}
-    <div className={'login-stage ' + (phase === 'ready' ? 'is-ready' : '')}>
-      <div className="login-motion-control"><MotionToggle /></div>
-      {children}
-    </div>
-  </div>
+export function LoginExperience({ initialRole = 'student', error = '' }: { initialRole?: Role; error?: string }) {
+  const [role, setRole] = useState<Role>(initialRole)
+  const roleTitle = role === 'student' ? 'الطالب' : role === 'teacher' ? 'المدرس' : 'الإدارة'
+  const errorText: Record<string, string> = {
+    invalid: 'بيانات الدخول غير صحيحة.', missing: 'أدخل اسم المستخدم وكلمة المرور.', rate_limited: 'محاولات كثيرة. انتظر قليلًا ثم حاول.',
+    password_locked: 'تم إيقاف المحاولات مؤقتًا لحماية الحساب.', registration_expired: 'انتهت جلسة التسجيل. ابدأ من جديد.',
+  }
+  return <main className="login-page"><div className="login-decoration"><span className="login-orb orb-a"/><span className="login-orb orb-b"/><div className="login-brand"><span className="brand-mark"><span>م</span></span><span><b>مَدارِس</b><small>مساحتك للتعلّم والنمو</small></span></div><div className="login-quote"><span>✦</span><h1>رحلتك التعليمية<br/>تبدأ من هنا.</h1><p>تابع دراستك، أنجز مهامك، واحتفل بكل خطوة إلى الأمام.</p><div className="login-dots"><i/><i/><i/></div></div><div className="login-footer-note">بوابة تعليمية آمنة ومخصصة لطلبة المدرسة</div></div><section className="login-form-wrap"><div className="login-form-card"><div className="login-welcome"><span className="login-welcome-icon">👋</span><p>أهلًا بك من جديد</p><h2>اختر نوع حسابك</h2><small>حتى نعرض لك صفحة الدخول المناسبة.</small></div><div className="login-role-grid" role="group" aria-label="اختيار نوع الحساب">{roles.map(({id,title,detail,Icon})=><button key={id} type="button" onClick={()=>setRole(id)} aria-pressed={role===id} className={`login-role-card ${role===id?'selected':''}`}><span className="role-icon"><Icon size={21}/></span><b>{title}</b><small>{detail}</small></button>)}</div><div className="selected-role-heading"><span className="selected-role-icon"><UserRound size={16}/></span><span><b>دخول {roleTitle}</b><small>استخدم بيانات الحساب المسجل في المدرسة.</small></span></div>{errorText[error]&&<div className="login-error" role="alert">{errorText[error]}</div>}<form action={loginAction} className="login-form"><input type="hidden" name="loginRole" value={role}/><label>اسم المستخدم أو البريد أو الهاتف<span><input name="identifier" autoComplete="username" placeholder={role==='admin'?'اسم المستخدم أو البريد الإداري':'اكتب اسم المستخدم أو البريد'} required/></span></label><label>كلمة المرور<span><input type="password" name="password" autoComplete="current-password" placeholder="أدخل كلمة المرور" required/></span></label><button type="submit" className="login-submit">دخول {roleTitle} <ArrowLeft size={16}/></button></form>{role!=='admin'&&<div className="register-prompt">حسابك جديد؟ <Link href={`/register?role=${role}`}>إنشاء حساب {roleTitle}</Link></div>}{role==='student'&&process.env.NODE_ENV!=='production'&&<form action={startPreview} className="preview-form"><button className="preview-submit" type="submit"><Sparkles size={14}/> معاينة الواجهة ببيانات تجريبية</button></form>}<p className="login-help">تواجه مشكلة في الدخول؟ <a href="mailto:school@example.edu.iq">تواصل مع إدارة المدرسة</a></p><small className="login-privacy">بتسجيل الدخول، أنت توافق على سياسة الاستخدام والخصوصية.</small></div></section></main>
 }
