@@ -1,13 +1,12 @@
 import crypto from 'node:crypto'
 import { and, desc, eq, or, type SQL } from 'drizzle-orm'
 import { requireDb } from '@/db'
-import { classes, notifications, registrationRequests, subjects, users } from '@/db/schema'
+import { classes, notifications, registrationRequests, schools, subjects, users } from '@/db/schema'
 import { apiError, apiJson, readJson } from '@/lib/api/v1'
 import { hashPassword } from '@/lib/auth'
 import { getClientIp, isRequestFlooded, isValidIraqiPhone, isValidTripleName, normalizeFullName, normalizePhone } from '@/lib/security'
+import { consumeInvite, inspectInvite } from '@/lib/invitations'
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
 
 type GoogleTokenInfo = { aud?: string; iss?: string; exp?: string; sub?: string; email?: string; email_verified?: string; name?: string }
 
@@ -34,25 +33,33 @@ function validBirthDate(value: string) {
   return !Number.isNaN(date.getTime()) && date <= new Date()
 }
 
-async function notifyAdmins(role: 'student' | 'teacher', fullName: string, phone: string | null) {
+async function notifyAdmins(role: 'student' | 'teacher' | 'school_admin', fullName: string, phone: string | null, schoolId: string) {
   const db = requireDb()
-  const admins = await db.select({ id: users.id }).from(users).where(and(eq(users.role, 'admin'), eq(users.isActive, true)))
+  const admins = await db.select({ id: users.id }).from(users).where(and(eq(users.isActive, true), role === 'school_admin' ? eq(users.role, 'admin') : or(eq(users.role, 'admin'), and(eq(users.role, 'school_admin'), eq(users.schoolId, schoolId)))))
   if (!admins.length) return
   const teacher = role === 'teacher'
+  const schoolAdmin = role === 'school_admin'
   await db.insert(notifications).values(admins.map(admin => ({
     userId: admin.id,
-    titleAr: teacher ? 'طلب تسجيل مدرس جديد' : 'طلب تسجيل طالب جديد',
-    titleEn: teacher ? 'New teacher registration request' : 'New student registration request',
+    schoolId,
+    titleAr: schoolAdmin ? 'طلب مسؤول مدرسة جديد' : teacher ? 'طلب تسجيل مدرس جديد' : 'طلب تسجيل طالب جديد',
+    titleEn: schoolAdmin ? 'New school administrator request' : teacher ? 'New teacher registration request' : 'New student registration request',
     bodyAr: `${fullName} أرسل طلب تسجيل. الهاتف: ${phone || 'غير محدد'}`,
     bodyEn: `${fullName} submitted a registration request. Phone: ${phone || 'not provided'}`,
   })))
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const code = new URL(request.url).searchParams.get('invite') || ''
+  const invite = code ? await inspectInvite(code) : null
+  if (code && !invite) return apiError('invalid_invite', 'رمز الدعوة غير صالح.', 400)
   const db = requireDb()
+  const [defaultSchool] = invite ? [] : await db.select({ id: schools.id }).from(schools).where(eq(schools.isActive, true)).orderBy(schools.createdAt).limit(1)
+  const schoolId = invite?.schoolId ?? defaultSchool?.id
+  if (!schoolId) return apiJson({ classes: [], subjects: [] })
   const [classRows, subjectRows] = await Promise.all([
-    db.select({ id: classes.id, nameAr: classes.nameAr, nameEn: classes.nameEn, gradeLevel: classes.gradeLevel, section: classes.section }).from(classes).orderBy(classes.gradeLevel, classes.nameAr),
-    db.select({ id: subjects.id, nameAr: subjects.nameAr, nameEn: subjects.nameEn, code: subjects.code }).from(subjects).orderBy(subjects.nameAr),
+    db.select({ id: classes.id, nameAr: classes.nameAr, nameEn: classes.nameEn, gradeLevel: classes.gradeLevel, section: classes.section }).from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.gradeLevel, classes.nameAr),
+    db.select({ id: subjects.id, nameAr: subjects.nameAr, nameEn: subjects.nameEn, code: subjects.code }).from(subjects).where(eq(subjects.schoolId, schoolId)).orderBy(subjects.nameAr),
   ])
   return apiJson({ classes: classRows, subjects: subjectRows })
 }
@@ -61,7 +68,15 @@ export async function POST(request: Request) {
   const body = await readJson(request)
   if (!body) return apiError('invalid_json', 'صيغة الطلب غير صالحة.', 400)
   const db = requireDb()
-  const role = body.requestedRole === 'teacher' ? 'teacher' : 'student'
+  const inviteCode = String(body.inviteCode || '').trim()
+  const invite = inviteCode ? await inspectInvite(inviteCode) : null
+  if (inviteCode && !invite) return apiError('invalid_invite', 'رمز الدعوة غير صالح.', 400)
+  if (!invite && body.requestedRole === 'school_admin') return apiError('invalid_invite', 'مسؤول المدرسة يحتاج رمز دعوة من مسؤول المنصة.', 400)
+  const role = invite?.role ?? (body.requestedRole === 'teacher' ? 'teacher' : 'student')
+  if (body.requestedRole && body.requestedRole !== role) return apiError('invalid_invite', 'رمز الدعوة مخصص لنوع حساب مختلف.', 400)
+  const [defaultSchool] = invite ? [] : await db.select({ id: schools.id }).from(schools).where(eq(schools.isActive, true)).orderBy(schools.createdAt).limit(1)
+  const schoolId = invite?.schoolId ?? defaultSchool?.id
+  if (!schoolId) return apiError('school_unavailable', 'لا توجد مدرسة متاحة للتسجيل حاليًا.', 503)
   const method = body.method === 'password' ? 'password' : 'google'
   const fullName = normalizeFullName(String(body.fullName || ''))
   const birthDate = String(body.birthDate || '').trim()
@@ -71,17 +86,17 @@ export async function POST(request: Request) {
   const subjectId = String(body.subjectId || '').trim()
 
   if (!isValidTripleName(fullName)) return apiError('invalid_name', 'اكتب الاسم الثلاثي باستخدام الحروف فقط.', 400)
-  if (!validBirthDate(birthDate)) return apiError('invalid_birth_date', 'تاريخ الميلاد غير صالح.', 400)
+  if (role === 'student' && !validBirthDate(birthDate)) return apiError('invalid_birth_date', 'تاريخ الميلاد غير صالح.', 400)
   if (rawPhone && !isValidIraqiPhone(phone)) return apiError('invalid_phone', 'رقم الهاتف العراقي غير صالح.', 400)
   if (role === 'student' && !classId) return apiError('invalid_class', 'اختر الصف الدراسي.', 400)
-  if (role === 'teacher' && (!subjectId || !classId)) return apiError('invalid_teacher_request', 'اختر المادة والصف الذي تدرّسه.', 400)
+  if (role === 'teacher' && !subjectId) return apiError('invalid_teacher_request', 'اختر المادة التي تدرّسها.', 400)
 
-  if (role === 'student' || role === 'teacher') {
-    const [classRow] = await db.select({ id: classes.id }).from(classes).where(eq(classes.id, classId)).limit(1)
+  if (classId && (role === 'student' || role === 'teacher')) {
+    const [classRow] = await db.select({ id: classes.id }).from(classes).where(and(eq(classes.id, classId), eq(classes.schoolId, schoolId))).limit(1)
     if (!classRow) return apiError('invalid_class', 'الصف المحدد غير موجود.', 400)
   }
   if (role === 'teacher') {
-    const [subjectRow] = await db.select({ id: subjects.id }).from(subjects).where(eq(subjects.id, subjectId)).limit(1)
+    const [subjectRow] = await db.select({ id: subjects.id }).from(subjects).where(and(eq(subjects.id, subjectId), eq(subjects.schoolId, schoolId))).limit(1)
     if (!subjectRow) return apiError('invalid_subject', 'المادة المحددة غير موجودة.', 400)
   }
 
@@ -116,12 +131,12 @@ export async function POST(request: Request) {
     const [existingUser] = await db.select({ id: users.id, role: users.role, isActive: users.isActive }).from(users).where(or(eq(users.email, email), eq(users.googleSubject, googleSubject))).limit(1)
     if (existingUser) return apiError(existingUser.isActive ? 'account_exists' : 'account_inactive', existingUser.isActive ? 'هذا البريد مرتبط بحساب في المدرسة. سجّل الدخول بدل إنشاء حساب جديد.' : 'الحساب غير مفعّل. تواصل مع إدارة المدرسة.', 409)
   } else {
-    if (role !== 'student' && role !== 'teacher') return apiError('password_registration_not_supported', 'طريقة التسجيل غير مدعومة.', 400)
+    if (role === 'school_admin' && !String(body.email || '').trim()) return apiError('identifier_required', 'أدخل البريد الإلكتروني لمسؤول المدرسة.', 400)
     username = String(body.username || '').trim().toLowerCase() || null
     const requestedEmail = String(body.email || '').trim().toLowerCase()
     const password = typeof body.password === 'string' ? body.password : ''
     const passwordConfirm = typeof body.passwordConfirm === 'string' ? body.passwordConfirm : ''
-    if (role === 'teacher' && !requestedEmail) return apiError('identifier_required', 'أدخل البريد الإلكتروني للمدرس.', 400)
+    if ((role === 'teacher' || role === 'school_admin') && !requestedEmail) return apiError('identifier_required', 'أدخل البريد الإلكتروني.', 400)
     if (!username && !requestedEmail && !phone) return apiError('identifier_required', 'أدخل رقم الهاتف أو اسم المستخدم أو البريد الإلكتروني.', 400)
     if (username && !/^[a-z0-9._-]{5,32}$/.test(username)) return apiError('invalid_username', 'اسم المستخدم يجب أن يكون من 5 إلى 32 رمزًا إنجليزيًا.', 400)
     if (requestedEmail && (requestedEmail.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedEmail))) return apiError('invalid_email', 'البريد الإلكتروني غير صالح.', 400)
@@ -151,7 +166,10 @@ export async function POST(request: Request) {
     if (duplicate) return apiError('registration_pending', 'يوجد طلب تسجيل قيد المراجعة بهذه البيانات.', 409)
   }
 
+  if (invite && !await consumeInvite(invite.id)) return apiError('invite_exhausted', 'انتهت صلاحية رمز الدعوة أو اكتمل استخدامه.', 409)
   const [requestRow] = await db.insert(registrationRequests).values({
+    schoolId,
+    inviteId: invite?.id ?? null,
     googleSubject,
     email,
     googleName,
@@ -166,6 +184,6 @@ export async function POST(request: Request) {
     status: 'pending',
   }).returning({ id: registrationRequests.id })
 
-  await notifyAdmins(role, fullName, phone || null)
+  await notifyAdmins(role, fullName, phone || null, schoolId)
   return apiJson({ status: 'pending', requestId: requestRow.id, email: email.endsWith('@school-pulse.invalid') ? null : email, username, requestedRole: role }, 201)
 }

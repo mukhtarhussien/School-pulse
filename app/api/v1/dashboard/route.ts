@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { requireDb } from '@/db'
 import {
   announcements,
@@ -14,7 +14,6 @@ import {
 } from '@/db/schema'
 import { apiError, apiJson, getApiSession, getSiteBaseUrl, safeUser } from '@/lib/api/v1'
 
-export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   const auth = await getApiSession(request)
@@ -28,7 +27,7 @@ export async function GET(request: Request) {
 
   const [classRows, announcementRows, eventRows, notificationRows] = await Promise.all([
     user.classId
-      ? db.select({ id: classes.id, nameAr: classes.nameAr, nameEn: classes.nameEn, gradeLevel: classes.gradeLevel, section: classes.section, room: classes.room }).from(classes).where(eq(classes.id, user.classId)).limit(1)
+      ? db.select({ id: classes.id, nameAr: classes.nameAr, nameEn: classes.nameEn, gradeLevel: classes.gradeLevel, section: classes.section, room: classes.room }).from(classes).where(and(eq(classes.id, user.classId), ...(user.schoolId ? [eq(classes.schoolId, user.schoolId)] : []))).limit(1)
       : Promise.resolve([]),
     db.select({
       id: announcements.id,
@@ -40,6 +39,7 @@ export async function GET(request: Request) {
       publishedAt: announcements.publishedAt,
     }).from(announcements).where(and(
       eq(announcements.published, true),
+      ...(user.schoolId ? [eq(announcements.schoolId, user.schoolId)] : []),
       or(
         inArray(announcements.audience, ['all', audienceForRole]),
         and(eq(announcements.audience, 'class'), eq(announcements.classId, classId)),
@@ -55,9 +55,9 @@ export async function GET(request: Request) {
       endsAt: calendarEvents.endsAt,
       location: calendarEvents.location,
       classId: calendarEvents.classId,
-    }).from(calendarEvents).where(or(
-      sql`${calendarEvents.classId} is null`,
-      eq(calendarEvents.classId, classId),
+    }).from(calendarEvents).where(and(
+      ...(user.schoolId ? [eq(calendarEvents.schoolId, user.schoolId)] : []),
+      or(sql`${calendarEvents.classId} is null`, eq(calendarEvents.classId, classId)),
     )).orderBy(calendarEvents.startsAt).limit(40),
     db.select({
       id: notifications.id,
@@ -67,9 +67,9 @@ export async function GET(request: Request) {
       bodyEn: notifications.bodyEn,
       readAt: notifications.readAt,
       createdAt: notifications.createdAt,
-    }).from(notifications).where(or(
-      eq(notifications.userId, user.id),
-      sql`${notifications.userId} is null`,
+    }).from(notifications).where(and(
+      or(eq(notifications.userId, user.id), isNull(notifications.userId)),
+      user.schoolId ? or(eq(notifications.schoolId, user.schoolId), isNull(notifications.schoolId)) : isNull(notifications.schoolId),
     )).orderBy(desc(notifications.createdAt)).limit(30),
   ])
 
@@ -119,7 +119,7 @@ export async function GET(request: Request) {
       }).from(grades)
         .innerJoin(assessments, eq(assessments.id, grades.assessmentId))
         .innerJoin(subjects, eq(subjects.id, assessments.subjectId))
-        .where(and(eq(grades.studentId, user.id), eq(assessments.published, true)))
+        .where(and(eq(grades.studentId, user.id), eq(assessments.published, true), ...(user.schoolId ? [eq(grades.schoolId, user.schoolId)] : []), ...(user.schoolId ? [eq(assessments.schoolId, user.schoolId)] : [])))
         .orderBy(desc(grades.gradedAt))
         .limit(50),
       db.select({
@@ -141,7 +141,7 @@ export async function GET(request: Request) {
           eq(assignmentSubmissions.assignmentId, assignments.id),
           eq(assignmentSubmissions.studentId, user.id),
         ))
-        .where(and(eq(assignments.published, true), eq(assignments.classId, classId)))
+        .where(and(eq(assignments.published, true), eq(assignments.classId, classId), ...(user.schoolId ? [eq(assignments.schoolId, user.schoolId)] : [])))
         .orderBy(assignments.dueAt)
         .limit(50),
       db.select({
@@ -149,7 +149,7 @@ export async function GET(request: Request) {
         status: attendanceRecords.status,
         note: attendanceRecords.note,
       }).from(attendanceRecords)
-        .where(eq(attendanceRecords.studentId, user.id))
+        .where(and(eq(attendanceRecords.studentId, user.id), ...(user.schoolId ? [eq(attendanceRecords.schoolId, user.schoolId)] : [])))
         .orderBy(desc(attendanceRecords.date))
         .limit(30),
     ])

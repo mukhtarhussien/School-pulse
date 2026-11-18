@@ -1,9 +1,9 @@
 import 'server-only'
 import crypto from 'node:crypto'
 import { cookies } from 'next/headers'
-import { and, eq, gt, lt, sql } from 'drizzle-orm'
+import { and, eq, gt, lt, or, sql } from 'drizzle-orm'
 import { requireDb } from '@/db'
-import { authChallenges, sessions, users } from '@/db/schema'
+import { authChallenges, schools, sessions, users } from '@/db/schema'
 import { decryptTotpSecret, hashRecoveryCode, normaliseRecoveryCode, verifyTotpCode } from '@/lib/totp'
 
 const COOKIE = 'school_pulse_session'
@@ -186,7 +186,15 @@ export async function getCurrentUser() {
   const store = await cookies()
   const token = readSignedToken(store.get(COOKIE)?.value)
   if (!token) return null
-  const row = await requireDb().select({ user: users }).from(sessions).innerJoin(users, eq(users.id, sessions.userId)).where(and(eq(sessions.tokenHash, hashToken(token)), gt(sessions.expiresAt, new Date()), eq(users.isActive, true))).limit(1)
+  const row = await requireDb().select({ user: users }).from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
+    .leftJoin(schools, eq(schools.id, users.schoolId))
+    .where(and(
+      eq(sessions.tokenHash, hashToken(token)),
+      gt(sessions.expiresAt, new Date()),
+      eq(users.isActive, true),
+      or(eq(users.role, 'admin'), eq(schools.isActive, true)),
+    )).limit(1)
   return row[0]?.user ?? null
 }
 

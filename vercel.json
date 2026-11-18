@@ -1,0 +1,26 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "routes": [
+    {
+      "src": "/(.*)",
+      "has": [
+        {
+          "type": "header",
+          "key": "x-vercel-ip-country",
+          "value": { "neq": "IQ" }
+        }
+      ],
+      "mitigate": { "action": "deny" }
+    },
+    {
+      "src": "/(.*)",
+      "missing": [
+        {
+          "type": "header",
+          "key": "x-vercel-ip-country"
+        }
+      ],
+      "mitigate": { "action": "deny" }
+    }
+  ]
+}

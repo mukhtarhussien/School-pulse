@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { exchangeGoogleCode, fetchGoogleProfile, readGoogleOAuthState, resolveGoogleLogin, setAdminGoogleLoginIdentity } from '@/lib/google'
 import { isRequestFlooded } from '@/lib/security'
 
-export const runtime = 'nodejs'
 
 export async function GET(request: Request) {
   const url = new URL(request.url)

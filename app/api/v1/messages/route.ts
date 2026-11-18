@@ -3,8 +3,8 @@ import { alias } from 'drizzle-orm/pg-core'
 import { requireDb } from '@/db'
 import { messageRequests, users } from '@/db/schema'
 import { apiError, apiJson, getApiSession, getSiteBaseUrl, readJson } from '@/lib/api/v1'
+import { isSocialEnabled, socialMessageAudience } from '@/lib/tenant'
 
-export const dynamic = 'force-dynamic'
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export async function GET(request: Request) {
@@ -14,20 +14,29 @@ export async function GET(request: Request) {
   const sender = alias(users, 'api_message_sender')
   const recipient = alias(users, 'api_message_recipient')
   const [contacts, messages] = await Promise.all([
-    db.select({ id: users.id, name: users.fullNameAr, role: users.role, preferences: users.preferences })
+    db.select({ id: users.id, name: users.fullNameAr, role: users.role, schoolId: users.schoolId, preferences: users.preferences })
       .from(users).where(eq(users.isActive, true)).orderBy(asc(users.fullNameAr)),
-    db.select({ id: messageRequests.id, senderId: messageRequests.senderId, recipientId: messageRequests.recipientId, body: messageRequests.body, subject: messageRequests.subject, status: messageRequests.status, createdAt: messageRequests.createdAt, senderName: sender.fullNameAr, senderPhotoKey: sender.preferences, recipientName: recipient.fullNameAr, recipientPhotoKey: recipient.preferences })
+    db.select({ id: messageRequests.id, senderId: messageRequests.senderId, recipientId: messageRequests.recipientId, body: messageRequests.body, subject: messageRequests.subject, status: messageRequests.status, channel: messageRequests.channel, schoolId: messageRequests.schoolId, createdAt: messageRequests.createdAt, senderName: sender.fullNameAr, senderPhotoKey: sender.preferences, recipientName: recipient.fullNameAr, recipientPhotoKey: recipient.preferences })
       .from(messageRequests).innerJoin(sender, eq(sender.id, messageRequests.senderId)).innerJoin(recipient, eq(recipient.id, messageRequests.recipientId))
-      .where(or(eq(messageRequests.senderId, auth.user.id), eq(messageRequests.recipientId, auth.user.id))).orderBy(desc(messageRequests.createdAt)).limit(200),
+      .where(and(or(eq(messageRequests.senderId, auth.user.id), eq(messageRequests.recipientId, auth.user.id)), or(eq(messageRequests.channel, 'social'), ...(auth.user.schoolId ? [eq(messageRequests.schoolId, auth.user.schoolId)] : [])))).orderBy(desc(messageRequests.createdAt)).limit(200),
   ])
   const blockedIds = Array.isArray(auth.user.preferences?.blockedUserIds) ? auth.user.preferences.blockedUserIds : []
   const unavailableIds = new Set([...blockedIds, ...contacts.filter(contact => Array.isArray(contact.preferences?.blockedUserIds) && contact.preferences!.blockedUserIds!.includes(auth.user.id)).map(contact => contact.id)])
-  const visibleContacts = contacts.filter(contact => contact.id !== auth.user.id && !unavailableIds.has(contact.id))
-  const visibleMessages = messages.filter(row => !unavailableIds.has(row.senderId === auth.user.id ? row.recipientId : row.senderId)).map(row => ({
-    ...row,
-    senderPhotoUrl: row.senderPhotoKey?.profilePhotoKey ? getSiteBaseUrl(request) + '/api/profile-photo/' + row.senderId + '?v=' + encodeURIComponent(row.senderPhotoKey.profilePhotoKey || '') : null,
-    recipientPhotoUrl: row.recipientPhotoKey?.profilePhotoKey ? getSiteBaseUrl(request) + '/api/profile-photo/' + row.recipientId + '?v=' + encodeURIComponent(row.recipientPhotoKey.profilePhotoKey || '') : null,
-  }))
+  const acceptedIds = new Set(messages.filter(row => ['accepted', 'read'].includes(row.status)).map(row => row.senderId === auth.user.id ? row.recipientId : row.senderId))
+  const visibleContacts = contacts.filter(contact => {
+    if (contact.id === auth.user.id || unavailableIds.has(contact.id)) return false
+    if (auth.user.schoolId && contact.schoolId === auth.user.schoolId) return true
+    const audience = socialMessageAudience({ ...contact, preferences: contact.preferences })
+    return isSocialEnabled(auth.user) && contact.preferences?.socialEnabled !== false && ['student', 'teacher'].includes(auth.user.role) && ['student', 'teacher'].includes(contact.role) && (audience === 'platform' || (audience === 'contacts' && acceptedIds.has(contact.id)))
+  })
+  const visibleMessages = messages.filter(row => !unavailableIds.has(row.senderId === auth.user.id ? row.recipientId : row.senderId) && (row.channel === 'school' || (isSocialEnabled(auth.user) && (row.senderId === auth.user.id ? row.recipientPhotoKey?.socialEnabled !== false : row.senderPhotoKey?.socialEnabled !== false)))).map(row => {
+    const { senderPhotoKey, recipientPhotoKey, channel: _channel, schoolId: _schoolId, ...message } = row
+    return {
+      ...message,
+      senderPhotoUrl: senderPhotoKey?.profilePhotoKey ? getSiteBaseUrl(request) + '/api/profile-photo/' + row.senderId + '?v=' + encodeURIComponent(senderPhotoKey.profilePhotoKey || '') : null,
+      recipientPhotoUrl: recipientPhotoKey?.profilePhotoKey ? getSiteBaseUrl(request) + '/api/profile-photo/' + row.recipientId + '?v=' + encodeURIComponent(recipientPhotoKey.profilePhotoKey || '') : null,
+    }
+  })
   const blockedUsers = contacts.filter(contact => blockedIds.includes(contact.id)).map(({ id, name, role }) => ({ id, name, role }))
   return apiJson({ currentUserId: auth.user.id, contacts: visibleContacts.map(({ id, name, role, preferences }) => ({ id, name, role, photoUrl: preferences?.profilePhotoKey ? getSiteBaseUrl(request) + '/api/profile-photo/' + id + '?v=' + encodeURIComponent(preferences?.profilePhotoKey || '') : null })), messages: visibleMessages, blockedIds, blockedUsers })
 }
@@ -44,24 +53,31 @@ export async function POST(request: Request) {
     const body = String(input.body || '').trim()
     const subject = String(input.subject || '').trim()
     if (!uuidPattern.test(recipientId) || recipientId === auth.user.id || !body || body.length > 3000 || subject.length > 180) return apiError('invalid_message', 'تحقق من محتوى الرسالة.', 400)
-    const [recipient] = await db.select({ id: users.id, preferences: users.preferences }).from(users).where(and(eq(users.id, recipientId), eq(users.isActive, true))).limit(1)
+    const [recipient] = await db.select({ id: users.id, schoolId: users.schoolId, role: users.role, preferences: users.preferences }).from(users).where(and(eq(users.id, recipientId), eq(users.isActive, true))).limit(1)
     if (!recipient) return apiError('unavailable', 'هذا الحساب غير متاح للتواصل.', 404)
     const senderBlockedIds = Array.isArray(auth.user.preferences?.blockedUserIds) ? auth.user.preferences.blockedUserIds : []
     const recipientBlockedIds = Array.isArray(recipient.preferences?.blockedUserIds) ? recipient.preferences.blockedUserIds : []
     if (senderBlockedIds.includes(recipientId) || recipientBlockedIds.includes(auth.user.id)) return apiError('unavailable', 'هذا الحساب غير متاح للتواصل.', 403)
+    const sameSchool = Boolean(auth.user.schoolId && recipient.schoolId && auth.user.schoolId === recipient.schoolId)
+    const channel = sameSchool ? 'school' : 'social'
+    const recipientAudience = socialMessageAudience({ ...recipient, preferences: recipient.preferences })
+    if (!sameSchool && (!auth.user.schoolId || !['student', 'teacher'].includes(auth.user.role) || !['student', 'teacher'].includes(recipient.role) || !isSocialEnabled(auth.user) || recipient.preferences?.socialEnabled === false || recipientAudience === 'school')) return apiError('unavailable', 'هذا الحساب غير متاح للتواصل.', 403)
     const relation = or(and(eq(messageRequests.senderId, auth.user.id), eq(messageRequests.recipientId, recipientId)), and(eq(messageRequests.senderId, recipientId), eq(messageRequests.recipientId, auth.user.id)))
     const [accepted] = await db.select({ id: messageRequests.id }).from(messageRequests).where(and(relation, inArray(messageRequests.status, ['accepted', 'read'] as const))).limit(1)
+    if (!sameSchool && recipientAudience === 'contacts' && !accepted) return apiError('unavailable', 'هذا الحساب يقبل الرسائل من جهات الاتصال فقط.', 403)
     if (!accepted) {
       const [rejected] = await db.select({ id: messageRequests.id }).from(messageRequests).where(and(eq(messageRequests.senderId, auth.user.id), eq(messageRequests.recipientId, recipientId), eq(messageRequests.status, 'rejected'))).limit(1)
       if (rejected) return apiError('unavailable', 'تم رفض طلب التواصل لهذا الحساب.', 403)
     }
-    const [created] = await db.insert(messageRequests).values({ senderId: auth.user.id, recipientId, subject: subject || null, body, status: accepted ? 'accepted' : 'pending' }).returning({ id: messageRequests.id })
+    const [created] = await db.insert(messageRequests).values({ schoolId: sameSchool ? auth.user.schoolId : null, channel, senderId: auth.user.id, recipientId, subject: subject || null, body, status: accepted ? 'accepted' : 'pending' }).returning({ id: messageRequests.id })
     return apiJson({ id: created.id }, 201)
   }
   if (action === 'respond') {
     const requestId = String(input.requestId || '')
     const intent = String(input.intent || '')
     if (!uuidPattern.test(requestId) || !['accept', 'reject'].includes(intent)) return apiError('invalid_request', 'طلب التواصل غير صالح.', 400)
+    const [pending] = await db.select({ channel: messageRequests.channel, schoolId: messageRequests.schoolId }).from(messageRequests).where(and(eq(messageRequests.id, requestId), eq(messageRequests.recipientId, auth.user.id), eq(messageRequests.status, 'pending'))).limit(1)
+    if (!pending || (pending.channel === 'school' && pending.schoolId !== auth.user.schoolId) || (pending.channel === 'social' && (!isSocialEnabled(auth.user) || !auth.user.schoolId))) return apiError('not_found', 'طلب التواصل غير موجود أو غير متاح.', 404)
     const [updated] = await db.update(messageRequests).set({ status: intent === 'accept' ? 'accepted' : 'rejected' }).where(and(eq(messageRequests.id, requestId), eq(messageRequests.recipientId, auth.user.id), eq(messageRequests.status, 'pending'))).returning({ id: messageRequests.id })
     if (!updated) return apiError('not_found', 'طلب التواصل غير موجود أو تمت معالجته.', 404)
     return apiJson({ saved: true })

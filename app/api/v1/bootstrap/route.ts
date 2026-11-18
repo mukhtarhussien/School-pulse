@@ -3,7 +3,6 @@ import { requireDb } from '@/db'
 import { siteSettings } from '@/db/schema'
 import { apiJson, getSiteBaseUrl } from '@/lib/api/v1'
 
-export const dynamic = 'force-dynamic'
 
 const publicKeys = [
   'portal_name_ar',

@@ -1,9 +1,9 @@
 import 'server-only'
 import crypto from 'node:crypto'
-import { and, eq, gt, lt, sql } from 'drizzle-orm'
+import { and, eq, gt, lt, or, sql } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 import { requireDb } from '@/db'
-import { authChallenges, sessions, users, type User } from '@/db/schema'
+import { authChallenges, schools, sessions, users, type User } from '@/db/schema'
 import { decryptTotpSecret, hashRecoveryCode, normaliseRecoveryCode, verifyTotpCode } from '@/lib/totp'
 
 export const API_VERSION = '1'
@@ -70,10 +70,12 @@ export async function getApiSession(request: Request) {
   const [result] = await requireDb().select({ session: sessions, user: users })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
+    .leftJoin(schools, eq(schools.id, users.schoolId))
     .where(and(
       eq(sessions.tokenHash, hashToken(match[1])),
       gt(sessions.expiresAt, new Date()),
       eq(users.isActive, true),
+      or(eq(users.role, 'admin'), eq(schools.isActive, true)),
     ))
     .limit(1)
   return result ?? null

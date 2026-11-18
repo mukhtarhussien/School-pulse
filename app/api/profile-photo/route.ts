@@ -9,8 +9,6 @@ import { getCurrentUser } from '@/lib/auth'
 import { getApiUser } from '@/lib/api/v1'
 import { APP_STORAGE_BUCKET, getObjectStorageClient } from '@/lib/object-storage'
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
 
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024
 const keyPattern = (userId: string) => new RegExp(`^avatars/${userId}/[0-9a-f-]{36}\\.jpg$`, 'i')

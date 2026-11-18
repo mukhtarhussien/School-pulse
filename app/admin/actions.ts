@@ -7,9 +7,12 @@ import { requireDb } from '@/db'
 import {
   announcements, assessments, assignments, attendanceRecords, calendarEvents,
   classes, communityPosts, files, grades, notifications, rules, schoolLocations,
-  siteSettings, subjects, teachingAssignments, teachers, users, registrationRequests, sessions
+  siteSettings, subjects, teachingAssignments, teachers, users, registrationRequests, sessions,
+  schools, schoolInvites,
 } from '@/db/schema'
 import { guardAdmin } from '@/lib/admin'
+import { createRawInviteCode, hashInviteCode, isInviteRole } from '@/lib/invitations'
+import { requireSchoolManager } from '@/lib/tenant'
 import { normalizePhone } from '@/lib/security'
 import { hashPassword, verifyPassword } from '@/lib/auth'
 import {
@@ -29,6 +32,7 @@ const optionalDate = (value: string) => value ? new Date(value) : null
 const refresh = async (paths: string[] = ['/admin']) => {
   paths.forEach(path => revalidatePath(path))
 }
+const defaultSchoolId = async (requestedSchoolId?: string) => (await requireSchoolManager(requestedSchoolId)).schoolId
 
 type TotpActionState = {
   ok?: boolean
@@ -176,11 +180,13 @@ export async function approveRegistrationAction(fd: FormData) {
   const db = requireDb()
   const id = str(fd, 'id')
   const request = (await db.select().from(registrationRequests).where(and(eq(registrationRequests.id, id), eq(registrationRequests.status, 'pending'))).limit(1))[0]
-  const role: 'student' | 'teacher' | 'admin' = request?.requestedRole === 'teacher' || request?.requestedRole === 'admin' ? request.requestedRole : 'student'
+  const role: 'student' | 'teacher' | 'school_admin' | 'admin' = request?.requestedRole === 'teacher' || request?.requestedRole === 'school_admin' || request?.requestedRole === 'admin' ? request.requestedRole : 'student'
 
-  if (!request || !request.fullName || !request.birthDate) throw new Error('INVALID_REGISTRATION')
+  if (!request || !request.fullName || (role === 'student' && !request.birthDate)) throw new Error('INVALID_REGISTRATION')
+  if (role !== 'admin' && !request.schoolId) throw new Error('INVALID_REGISTRATION')
   if (role === 'student' && !request.classId) throw new Error('INVALID_REGISTRATION')
   if (role === 'teacher' && !request.subjectId) throw new Error('INVALID_REGISTRATION')
+  if (role === 'school_admin' && !request.inviteId) throw new Error('INVALID_REGISTRATION')
   if (role === 'admin' && !request.email.includes('@')) throw new Error('INVALID_REGISTRATION')
 
   const existingGoogle = request.googleSubject
@@ -213,6 +219,7 @@ export async function approveRegistrationAction(fd: FormData) {
       phone: request.phone,
       birthDate: request.birthDate,
       classId: role === 'student' ? request.classId : null,
+      schoolId: request.schoolId,
       role,
       studentNumber,
       isActive: true,
@@ -231,6 +238,7 @@ export async function approveRegistrationAction(fd: FormData) {
       birthDate: request.birthDate,
       googleSubject: request.googleSubject,
       classId: role === 'student' ? request.classId : null,
+      schoolId: request.schoolId,
       isActive: true,
     }).returning({ id: users.id })
     userId = created.id
@@ -254,7 +262,7 @@ export async function approveRegistrationAction(fd: FormData) {
       const academicYear = `${yearStart}-${yearStart + 1}`
       const semester = 'العام الدراسي'
       const [assignment] = await db.select({ id: teachingAssignments.id }).from(teachingAssignments).where(and(eq(teachingAssignments.teacherId, teacher.id), eq(teachingAssignments.subjectId, request.subjectId), eq(teachingAssignments.classId, request.classId), eq(teachingAssignments.academicYear, academicYear), eq(teachingAssignments.semester, semester))).limit(1)
-      if (!assignment) await db.insert(teachingAssignments).values({ teacherId: teacher.id, subjectId: request.subjectId, classId: request.classId, academicYear, semester })
+      if (!assignment) await db.insert(teachingAssignments).values({ schoolId: request.schoolId!, teacherId: teacher.id, subjectId: request.subjectId, classId: request.classId, academicYear, semester })
     }
   }
 
@@ -290,8 +298,10 @@ export async function rejectRegistrationAction(fd: FormData) {
 
 export async function createClassAction(fd: FormData) {
   await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(classes).values({
+    schoolId,
     nameAr: str(fd, 'nameAr'),
     nameEn: str(fd, 'nameEn'),
     gradeLevel: num(fd, 'gradeLevel'),
@@ -305,8 +315,10 @@ export async function createClassAction(fd: FormData) {
 
 export async function createSubjectAction(fd: FormData) {
   await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(subjects).values({
+    schoolId,
     code: str(fd, 'code'),
     nameAr: str(fd, 'nameAr'),
     nameEn: str(fd, 'nameEn'),
@@ -323,10 +335,12 @@ async function createUser(
   await guardAdmin()
 
   const db = requireDb()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   const [user] = await db
     .insert(users)
     .values({
+      schoolId,
       email: str(fd, 'email').toLowerCase(),
       passwordHash: hashPassword(str(fd, 'password')),
       fullNameAr: str(fd, 'fullNameAr'),
@@ -357,6 +371,46 @@ export async function createTeacherAction(fd: FormData) {
 
 export async function createStudentAction(fd: FormData) {
   await createUser(fd, 'student')
+}
+
+export async function createSchoolAction(fd: FormData) {
+  await guardAdmin()
+  const nameAr = str(fd, 'nameAr')
+  const nameEn = str(fd, 'nameEn')
+  const slug = str(fd, 'slug').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+  if (nameAr.length < 2 || nameAr.length > 180 || nameEn.length < 2 || nameEn.length > 180 || !/^[a-z0-9][a-z0-9-]{1,98}$/.test(slug)) throw new Error('INVALID_SCHOOL')
+  const [created] = await requireDb().insert(schools).values({ nameAr, nameEn, slug }).returning({ id: schools.id })
+  revalidatePath('/admin')
+  return created
+}
+
+export async function createSchoolInviteAction(fd: FormData) {
+  const requestedSchoolId = str(fd, 'schoolId') || undefined
+  const manager = await requireSchoolManager(requestedSchoolId)
+  const role = str(fd, 'role')
+  if (!isInviteRole(role) || (role === 'school_admin' && !manager.platformWide)) throw new Error('INVALID_INVITE_ROLE')
+  const maxUses = Math.max(1, Math.min(500, Number(str(fd, 'maxUses')) || 1))
+  const expiryDays = Math.max(1, Math.min(90, Number(str(fd, 'expiryDays')) || 7))
+  const code = createRawInviteCode()
+  const [invite] = await requireDb().insert(schoolInvites).values({
+    schoolId: manager.schoolId,
+    role,
+    codeHash: hashInviteCode(code),
+    maxUses,
+    expiresAt: new Date(Date.now() + expiryDays * 86400000),
+    createdBy: manager.user.id,
+  }).returning({ id: schoolInvites.id, expiresAt: schoolInvites.expiresAt })
+  revalidatePath('/admin')
+  return { ...invite, code }
+}
+
+export async function revokeSchoolInviteAction(fd: FormData) {
+  const id = str(fd, 'id')
+  const invite = await requireDb().select({ schoolId: schoolInvites.schoolId }).from(schoolInvites).where(eq(schoolInvites.id, id)).limit(1)
+  if (!invite[0]) return
+  const manager = await requireSchoolManager(invite[0].schoolId)
+  await requireDb().update(schoolInvites).set({ revokedAt: new Date(), updatedAt: new Date() }).where(and(eq(schoolInvites.id, id), eq(schoolInvites.schoolId, manager.schoolId)))
+  revalidatePath('/admin')
 }
 
 export async function toggleUserAction(fd: FormData) {
@@ -391,8 +445,10 @@ export async function toggleUserAction(fd: FormData) {
 
 export async function assignTeacherAction(fd: FormData) {
   await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(teachingAssignments).values({
+    schoolId,
     teacherId: str(fd, 'teacherId'),
     subjectId: str(fd, 'subjectId'),
     classId: str(fd, 'classId'),
@@ -405,8 +461,10 @@ export async function assignTeacherAction(fd: FormData) {
 
 export async function createAssessmentAction(fd: FormData) {
   await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(assessments).values({
+    schoolId,
     titleAr: str(fd, 'titleAr'),
     titleEn: str(fd, 'titleEn'),
     type: str(fd, 'type') as any,
@@ -426,6 +484,7 @@ export async function upsertGradeAction(fd: FormData) {
   const db = requireDb()
   const assessmentId = str(fd, 'assessmentId')
   const studentId = str(fd, 'studentId')
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   const existing = await db
     .select({ id: grades.id })
@@ -452,6 +511,7 @@ export async function upsertGradeAction(fd: FormData) {
       .where(eq(grades.id, existing[0].id))
   } else {
     await db.insert(grades).values({
+      schoolId,
       assessmentId,
       studentId,
       ...payload,
@@ -465,6 +525,7 @@ export async function bulkGradesAction(fd: FormData) {
   const admin = await guardAdmin()
   const db = requireDb()
   const raw = str(fd, 'csv')
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   for (const line of raw
     .split(/\r?\n/)
@@ -523,6 +584,7 @@ export async function bulkGradesAction(fd: FormData) {
         .where(eq(grades.id, existing.id))
     } else {
       await db.insert(grades).values({
+        schoolId,
         assessmentId,
         studentId: student.id,
         ...payload,
@@ -535,9 +597,11 @@ export async function bulkGradesAction(fd: FormData) {
 
 export async function createAnnouncementAction(fd: FormData) {
   const admin = await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
   const published = bool(fd, 'published')
 
   await requireDb().insert(announcements).values({
+    schoolId,
     titleAr: str(fd, 'titleAr'),
     titleEn: str(fd, 'titleEn'),
     bodyAr: str(fd, 'bodyAr'),
@@ -554,8 +618,10 @@ export async function createAnnouncementAction(fd: FormData) {
 
 export async function createAssignmentAction(fd: FormData) {
   await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(assignments).values({
+    schoolId,
     titleAr: str(fd, 'titleAr'),
     titleEn: str(fd, 'titleEn'),
     descriptionAr: str(fd, 'descriptionAr') || null,
@@ -573,8 +639,10 @@ export async function createAssignmentAction(fd: FormData) {
 
 export async function createCalendarEventAction(fd: FormData) {
   const admin = await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(calendarEvents).values({
+    schoolId,
     titleAr: str(fd, 'titleAr'),
     titleEn: str(fd, 'titleEn'),
     descriptionAr: str(fd, 'descriptionAr') || null,
@@ -592,8 +660,10 @@ export async function createCalendarEventAction(fd: FormData) {
 
 export async function createRuleAction(fd: FormData) {
   await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(rules).values({
+    schoolId,
     titleAr: str(fd, 'titleAr'),
     titleEn: str(fd, 'titleEn'),
     bodyAr: str(fd, 'bodyAr'),
@@ -607,8 +677,10 @@ export async function createRuleAction(fd: FormData) {
 
 export async function createNotificationAction(fd: FormData) {
   await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(notifications).values({
+    schoolId,
     userId: str(fd, 'userId') || null,
     titleAr: str(fd, 'titleAr'),
     titleEn: str(fd, 'titleEn'),
@@ -621,8 +693,10 @@ export async function createNotificationAction(fd: FormData) {
 
 export async function createFileAction(fd: FormData) {
   const admin = await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(files).values({
+    schoolId,
     ownerId: str(fd, 'ownerId') || admin.id,
     name: str(fd, 'name'),
     url: str(fd, 'url'),
@@ -637,8 +711,10 @@ export async function createFileAction(fd: FormData) {
 
 export async function createLocationAction(fd: FormData) {
   await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(schoolLocations).values({
+    schoolId,
     nameAr: str(fd, 'nameAr'),
     nameEn: str(fd, 'nameEn'),
     descriptionAr: str(fd, 'descriptionAr') || null,
@@ -655,8 +731,10 @@ export async function createLocationAction(fd: FormData) {
 
 export async function createAttendanceAction(fd: FormData) {
   const admin = await guardAdmin()
+  const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
 
   await requireDb().insert(attendanceRecords).values({
+    schoolId,
     studentId: str(fd, 'studentId'),
     date: new Date(str(fd, 'date')),
     status: str(fd, 'status') as any,

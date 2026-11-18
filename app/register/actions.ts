@@ -8,6 +8,7 @@ import { classes, notifications, registrationRequests, subjects, users } from '@
 import { getRegistrationContext } from '@/lib/google'
 import { hashPassword } from '@/lib/auth'
 import { getClientIp, isRequestFlooded, isValidIraqiPhone, isValidTripleName, normalizeFullName, normalizePhone } from '@/lib/security'
+import { consumeInvite, inspectInvite } from '@/lib/invitations'
 
 const value = (fd: FormData, key: string) => String(fd.get(key) ?? '').trim()
 
@@ -28,7 +29,10 @@ export async function submitRegistrationAction(fd: FormData) {
   const rawUsername = value(fd, 'username').toLowerCase()
   const classId = value(fd, 'classId')
   const subjectId = value(fd, 'subjectId')
+  const inviteCode = value(fd, 'inviteCode')
   const requestedRole = request.requestedRole === 'teacher' ? 'teacher' : 'student'
+  const invite = await inspectInvite(inviteCode, requestedRole)
+  if (!invite) redirect(`/register?role=${requestedRole}&error=invite`)
 
   const flood = await isRequestFlooded([
     ['google', request.googleSubject],
@@ -44,10 +48,10 @@ export async function submitRegistrationAction(fd: FormData) {
 
   const database = requireDb()
   if (requestedRole === 'teacher') {
-    const [subject] = await database.select({ id: subjects.id }).from(subjects).where(eq(subjects.id, subjectId)).limit(1)
+    const [subject] = await database.select({ id: subjects.id }).from(subjects).where(and(eq(subjects.id, subjectId), eq(subjects.schoolId, invite.schoolId))).limit(1)
     if (!subject) redirect('/register?role=teacher&error=subject')
   } else {
-    const [classRow] = await database.select({ id: classes.id }).from(classes).where(eq(classes.id, classId)).limit(1)
+    const [classRow] = await database.select({ id: classes.id }).from(classes).where(and(eq(classes.id, classId), eq(classes.schoolId, invite.schoolId))).limit(1)
     if (!classRow) redirect('/register?error=class')
   }
 
@@ -64,7 +68,10 @@ export async function submitRegistrationAction(fd: FormData) {
     .where(and(eq(registrationRequests.phone, phone), eq(registrationRequests.status, 'pending'))).limit(1)
   if (duplicatePhone) redirect(`/register?role=${requestedRole}&error=phone_pending`)
 
+  if (!await consumeInvite(invite.id)) redirect(`/register?role=${requestedRole}&error=invite`)
   await database.update(registrationRequests).set({
+    schoolId: invite.schoolId,
+    inviteId: invite.id,
     requestedRole,
     username: rawUsername || null,
     fullName,
@@ -77,11 +84,12 @@ export async function submitRegistrationAction(fd: FormData) {
     rejectionReason: null,
   }).where(eq(registrationRequests.id, request.id))
 
-  const admins = await database.select({ id: users.id }).from(users).where(and(eq(users.role, 'admin'), eq(users.isActive, true)))
+  const admins = await database.select({ id: users.id }).from(users).where(and(eq(users.isActive, true), or(eq(users.role, 'admin'), and(eq(users.role, 'school_admin'), eq(users.schoolId, invite.schoolId)))))
   if (admins.length) {
     const teacher = requestedRole === 'teacher'
     await database.insert(notifications).values(admins.map(admin => ({
       userId: admin.id,
+      schoolId: invite.schoolId,
       titleAr: teacher ? 'طلب تسجيل مدرس جديد' : 'طلب تسجيل طالب جديد',
       titleEn: teacher ? 'New teacher registration request' : 'New student registration request',
       bodyAr: `${fullName} أرسل طلب تسجيل. الهاتف: ${phone}`,
@@ -94,12 +102,14 @@ export async function submitRegistrationAction(fd: FormData) {
 
 export async function submitPasswordRegistrationAction(fd: FormData) {
   const rawRole = value(fd, 'requestedRole')
-  const role: 'student' | 'teacher' | 'admin' = rawRole === 'teacher' || rawRole === 'admin' ? rawRole : 'student'
+  // Public registration is limited to student and teacher accounts. Admins are provisioned separately.
+  const role: 'student' | 'teacher' | 'school_admin' = rawRole === 'teacher' ? 'teacher' : rawRole === 'school_admin' ? 'school_admin' : 'student'
   const roleQuery = `method=password&role=${role}`
   const fullName = normalizeFullName(value(fd, 'fullName'))
   const birthDate = value(fd, 'birthDate')
   const classId = value(fd, 'classId')
   const subjectId = value(fd, 'subjectId')
+  const inviteCode = value(fd, 'inviteCode')
   const rawUsername = value(fd, 'username').toLowerCase()
   const email = value(fd, 'email').toLowerCase()
   const rawPhone = value(fd, 'phone')
@@ -107,12 +117,14 @@ export async function submitPasswordRegistrationAction(fd: FormData) {
   const password = String(fd.get('password') ?? '')
   const passwordConfirm = String(fd.get('passwordConfirm') ?? '')
 
+  const invite = await inspectInvite(inviteCode, role)
+  if (!invite) redirect(`/register?${roleQuery}&error=invite`)
   if (!isValidTripleName(fullName)) redirect(`/register?${roleQuery}&error=name`)
-  if (!validBirthDate(birthDate)) redirect(`/register?${roleQuery}&error=birth_date`)
+  if (role === 'student' && !validBirthDate(birthDate)) redirect(`/register?${roleQuery}&error=birth_date`)
   if (role === 'student' && !classId) redirect(`/register?${roleQuery}&error=class`)
   if (role === 'teacher' && !subjectId) redirect(`/register?${roleQuery}&error=subject`)
+  if (role === 'school_admin' && !email) redirect(`/register?${roleQuery}&error=email_required`)
   if (!rawUsername && !email && !phone) redirect(`/register?${roleQuery}&error=identifier`)
-  if (role === 'admin' && !email) redirect(`/register?${roleQuery}&error=email_required`)
   if (rawUsername && !/^[a-z0-9._-]{5,32}$/.test(rawUsername)) redirect(`/register?${roleQuery}&error=username`)
   if (email && (email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) redirect(`/register?${roleQuery}&error=email`)
   if (role === 'teacher' && !phone) redirect(`/register?${roleQuery}&error=phone`)
@@ -122,11 +134,11 @@ export async function submitPasswordRegistrationAction(fd: FormData) {
 
   const database = requireDb()
   if (role === 'student') {
-    const [classRow] = await database.select({ id: classes.id }).from(classes).where(eq(classes.id, classId)).limit(1)
+    const [classRow] = await database.select({ id: classes.id }).from(classes).where(and(eq(classes.id, classId), eq(classes.schoolId, invite.schoolId))).limit(1)
     if (!classRow) redirect(`/register?${roleQuery}&error=class`)
   }
   if (role === 'teacher') {
-    const [subjectRow] = await database.select({ id: subjects.id }).from(subjects).where(eq(subjects.id, subjectId)).limit(1)
+    const [subjectRow] = await database.select({ id: subjects.id }).from(subjects).where(and(eq(subjects.id, subjectId), eq(subjects.schoolId, invite.schoolId))).limit(1)
     if (!subjectRow) redirect(`/register?${roleQuery}&error=subject`)
   }
 
@@ -162,26 +174,31 @@ export async function submitPasswordRegistrationAction(fd: FormData) {
     redirect(`/register?${roleQuery}&error=phone_pending`)
   }
 
+  if (!await consumeInvite(invite.id)) redirect(`/register?${roleQuery}&error=invite`)
+
   await database.insert(registrationRequests).values({
+    schoolId: invite.schoolId,
+    inviteId: invite.id,
     googleSubject: null,
     email: loginEmail,
     username: rawUsername || null,
     passwordHash: hashPassword(password),
     requestedRole: role,
     fullName,
-    birthDate,
+    birthDate: birthDate || null,
     phone: phone || null,
     classId: role === 'student' ? classId : null,
     subjectId: role === 'teacher' ? subjectId : null,
     status: 'pending',
   })
 
-  const admins = await database.select({ id: users.id }).from(users).where(and(eq(users.role, 'admin'), eq(users.isActive, true)))
+  const admins = await database.select({ id: users.id }).from(users).where(and(eq(users.isActive, true), or(eq(users.role, 'admin'), and(eq(users.role, 'school_admin'), eq(users.schoolId, invite.schoolId)))))
   if (admins.length) {
-    const label = role === 'teacher' ? 'مدرس' : role === 'admin' ? 'مسؤول إدارة' : 'طالب'
-    const labelEn = role === 'teacher' ? 'teacher' : role === 'admin' ? 'administrator' : 'student'
+    const label = role === 'teacher' ? 'مدرس' : 'طالب'
+    const labelEn = role === 'teacher' ? 'teacher' : 'student'
     await database.insert(notifications).values(admins.map(admin => ({
       userId: admin.id,
+      schoolId: invite.schoolId,
       titleAr: `طلب حساب ${label} جديد`,
       titleEn: `New ${labelEn} account request`,
       bodyAr: `${fullName} أرسل طلبًا لإنشاء حساب ${label}.`,

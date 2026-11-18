@@ -1,6 +1,5 @@
 import { apiJson, API_VERSION } from '@/lib/api/v1'
 
-export const dynamic = 'force-dynamic'
 
 export async function GET() {
   return apiJson({

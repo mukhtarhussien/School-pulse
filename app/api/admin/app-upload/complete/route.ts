@@ -6,8 +6,6 @@ import { siteSettings } from '@/db/schema'
 import { getCurrentUser } from '@/lib/auth'
 import { APP_STORAGE_BUCKET, getObjectStorageClient } from '@/lib/object-storage'
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
   const user = await getCurrentUser()

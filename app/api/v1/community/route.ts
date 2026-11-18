@@ -1,16 +1,19 @@
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import { requireDb } from '@/db'
 import { communityComments, communityPostVotes, communityPosts, users } from '@/db/schema'
 import { apiError, apiJson, getApiSession, getSiteBaseUrl, readJson } from '@/lib/api/v1'
+import { isSocialEnabled } from '@/lib/tenant'
 
-export const dynamic = 'force-dynamic'
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export async function GET(request: Request) {
   const auth = await getApiSession(request)
   if (!auth) return apiError('unauthorized', 'سجّل الدخول لعرض مجتمع المدرسة.', 401)
+  if (!isSocialEnabled(auth.user)) return apiJson({ posts: [], socialEnabled: false })
+  if (!auth.user.schoolId || !['student', 'teacher', 'school_admin'].includes(auth.user.role)) return apiError('forbidden', 'المجتمع متاح لحسابات المدارس فقط.', 403)
 
   const db = requireDb()
+  const scope = new URL(request.url).searchParams.get('scope') === 'platform' ? 'platform' : 'school'
   const posts = await db.select({
     id: communityPosts.id,
     title: communityPosts.title,
@@ -24,12 +27,17 @@ export async function GET(request: Request) {
   })
     .from(communityPosts)
     .innerJoin(users, eq(users.id, communityPosts.authorId))
-    .where(eq(communityPosts.published, true))
+    .where(and(
+      eq(communityPosts.published, true),
+      eq(communityPosts.scope, scope),
+      scope === 'school' ? eq(communityPosts.schoolId, auth.user.schoolId) : isNull(communityPosts.schoolId),
+    ))
     .orderBy(desc(communityPosts.pinned), desc(communityPosts.createdAt))
     .limit(40)
 
-  const ids = posts.map(post => post.id)
-  if (!ids.length) return apiJson({ posts: [] })
+  const visiblePosts = posts.filter(post => post.authorPreferences?.socialEnabled !== false)
+  const visibleIds = visiblePosts.map(post => post.id)
+  if (!visibleIds.length) return apiJson({ posts: [] })
 
   const [comments, votes] = await Promise.all([
     db.select({
@@ -40,12 +48,13 @@ export async function GET(request: Request) {
       authorId: users.id,
       author: users.fullNameAr,
       authorEn: users.fullNameEn,
+      authorPreferences: users.preferences,
     })
       .from(communityComments)
       .innerJoin(users, eq(users.id, communityComments.authorId))
       .where(and(
         eq(communityComments.published, true),
-        inArray(communityComments.postId, ids),
+        inArray(communityComments.postId, visibleIds),
       ))
       .orderBy(desc(communityComments.createdAt)),
 
@@ -53,15 +62,19 @@ export async function GET(request: Request) {
       postId: communityPostVotes.postId,
       userId: communityPostVotes.userId,
       value: communityPostVotes.value,
-    })
-      .from(communityPostVotes)
-      .where(inArray(communityPostVotes.postId, ids)),
+      preferences: users.preferences,
+    }).from(communityPostVotes)
+      .innerJoin(users, eq(users.id, communityPostVotes.userId))
+      .where(and(inArray(communityPostVotes.postId, visibleIds), eq(users.isActive, true))),
   ])
 
+  const visibleComments = comments.filter(comment => comment.authorPreferences?.socialEnabled !== false)
+  const visibleVotes = votes.filter(vote => vote.preferences?.socialEnabled !== false)
+
   return apiJson({
-    posts: posts.map(post => {
+    posts: visiblePosts.map(post => {
       const { authorPreferences, ...publicPost } = post
-      const postVotes = votes.filter(vote => vote.postId === post.id)
+      const postVotes = visibleVotes.filter(vote => vote.postId === post.id)
 
       return {
         ...publicPost,
@@ -70,7 +83,7 @@ export async function GET(request: Request) {
           : null,
         score: postVotes.reduce((total, vote) => total + vote.value, 0),
         myVote: postVotes.find(vote => vote.userId === auth.user.id)?.value ?? 0,
-        comments: comments.filter(comment => comment.postId === post.id),
+        comments: visibleComments.filter(comment => comment.postId === post.id),
       }
     }),
   })
@@ -79,6 +92,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await getApiSession(request)
   if (!auth) return apiError('unauthorized', 'سجّل الدخول أولًا.', 401)
+  if (!isSocialEnabled(auth.user) || !auth.user.schoolId || !['student', 'teacher', 'school_admin'].includes(auth.user.role)) return apiError('social_disabled', 'فعّل المشاركة الاجتماعية من الإعدادات أولًا.', 403)
 
   const body = await readJson(request)
   if (!body) return apiError('invalid_json', 'صيغة الطلب غير صالحة.', 400)
@@ -92,8 +106,11 @@ export async function POST(request: Request) {
       return apiError('invalid_body', 'اكتب محتوى للمنشور لا يتجاوز ٥٠٠٠ حرف.', 400)
     }
 
+    const scope = body.scope === 'platform' ? 'platform' : 'school'
     const [post] = await db.insert(communityPosts).values({
       authorId: auth.user.id,
+      schoolId: scope === 'school' ? auth.user.schoolId : null,
+      scope,
       title: String(body.title || '').trim().slice(0, 180) || null,
       body: text,
       published: true,
@@ -108,11 +125,12 @@ export async function POST(request: Request) {
     return apiError('invalid_post', 'المنشور غير صالح.', 400)
   }
 
-  const [post] = await db.select({ id: communityPosts.id })
+  const [post] = await db.select({ id: communityPosts.id, schoolId: communityPosts.schoolId, scope: communityPosts.scope })
     .from(communityPosts)
     .where(and(
       eq(communityPosts.id, postId),
       eq(communityPosts.published, true),
+      or(eq(communityPosts.scope, 'platform'), eq(communityPosts.schoolId, auth.user.schoolId)),
     ))
     .limit(1)
 

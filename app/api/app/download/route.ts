@@ -6,8 +6,6 @@ import { siteSettings } from '@/db/schema'
 import { APP_STORAGE_BUCKET, getObjectStorageClient } from '@/lib/object-storage'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
