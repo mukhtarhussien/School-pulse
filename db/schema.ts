@@ -204,6 +204,14 @@ export const users = pgTable(
       }
     ),
 
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    lastLoginMethod: varchar('last_login_method', { length: 20 }),
+    lastLoginIpHash: varchar('last_login_ip_hash', { length: 64 }),
+    loginCount: integer('login_count').default(0).notNull(),
+    failedLoginCount: integer('failed_login_count').default(0).notNull(),
+    lastFailedLoginAt: timestamp('last_failed_login_at', { withTimezone: true }),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+
     isActive: boolean('is_active')
       .default(true)
       .notNull(),
@@ -1578,6 +1586,39 @@ export const platformReports = pgTable(
     categoryCheck: check('platform_reports_category_check', sql`${t.category} in ('bug', 'abuse', 'suggestion', 'other')`),
     inboxIdx: index('platform_reports_inbox_idx').on(t.status, t.createdAt),
     reporterIdx: index('platform_reports_reporter_idx').on(t.reporterId, t.createdAt),
+  })
+)
+
+export const platformDiagnostics = pgTable(
+  'platform_diagnostics',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    eventType: varchar('event_type', { length: 48 }).notNull(),
+    severity: varchar('severity', { length: 12 }).default('info').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
+    actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+    actorRole: varchar('actor_role', { length: 24 }),
+    subjectUserId: uuid('subject_user_id').references(() => users.id, { onDelete: 'set null' }),
+    route: varchar('route', { length: 255 }),
+    method: varchar('method', { length: 10 }),
+    statusCode: integer('status_code'),
+    durationMs: integer('duration_ms'),
+    errorCode: varchar('error_code', { length: 64 }),
+    errorDigest: varchar('error_digest', { length: 128 }),
+    message: varchar('message', { length: 500 }),
+    requestId: varchar('request_id', { length: 128 }),
+    ipHash: varchar('ip_hash', { length: 64 }),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+  },
+  (t) => ({
+    eventTimeIdx: index('platform_diagnostics_event_time_idx').on(t.eventType, t.occurredAt.desc()),
+    actorTimeIdx: index('platform_diagnostics_actor_time_idx').on(t.actorUserId, t.occurredAt.desc()),
+    subjectTimeIdx: index('platform_diagnostics_subject_time_idx').on(t.subjectUserId, t.occurredAt.desc()),
+    errorTimeIdx: index('platform_diagnostics_error_time_idx').on(t.errorCode, t.occurredAt.desc()),
+    routeTimeIdx: index('platform_diagnostics_route_time_idx').on(t.route, t.occurredAt.desc()),
+    severityCheck: check('platform_diagnostics_severity_check', sql`${t.severity} in ('info', 'warning', 'error', 'critical')`),
+    statusCheck: check('platform_diagnostics_status_check', sql`${t.statusCode} is null or (${t.statusCode} >= 100 and ${t.statusCode} <= 599)`),
+    durationCheck: check('platform_diagnostics_duration_check', sql`${t.durationMs} is null or ${t.durationMs} >= 0`),
   })
 )
 

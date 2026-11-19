@@ -1,11 +1,12 @@
 'use server'
 import { redirect } from 'next/navigation'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { requireDb } from '@/db'
 import { users } from '@/db/schema'
 import { checkPasswordLock, clearPasswordFailures, getClientIp, isRequestFlooded, normalizePhone, recordPasswordFailure } from '@/lib/security'
 import { clearTwoFactorChallenge, createSession, createTwoFactorChallenge, hashPassword, verifyPassword, verifyTwoFactorChallenge } from '@/lib/auth'
 import { clearAdminGoogleLoginIdentity, getAdminGoogleLoginIdentity } from '@/lib/google'
+import { hashDiagnosticIp, recordPlatformDiagnostic } from '@/lib/diagnostics'
 
 const DUMMY_PASSWORD_HASH = hashPassword('school-pulse-dummy-password')
 
@@ -34,6 +35,8 @@ export async function loginAction(formData: FormData) {
   const roleAllowed = user?.role === loginRole && (loginRole === 'student' || loginRole === 'teacher' || loginRole === 'admin')
   const googleIdentityMatches = !adminGoogleIdentity || normalized !== adminGoogleIdentity.email || !user?.googleSubject || user.googleSubject === adminGoogleIdentity.googleSubject
   if (!user || !user.isActive || !passwordValid || !roleAllowed || !googleIdentityMatches) {
+    if (user) await requireDb().update(users).set({ failedLoginCount: sql`${users.failedLoginCount} + 1`, lastFailedLoginAt: sql`now()` }).where(eq(users.id, user.id))
+    await recordPlatformDiagnostic({ eventType: 'auth_failure', severity: 'warning', subjectUserId: user?.id ?? null, actorRole: loginRole, method: 'password', statusCode: 401, ipHash: await hashDiagnosticIp(ip), message: 'Password authentication failed' })
     const result = await recordPasswordFailure([['identifier-ip', `${normalized}:${ip}`], ['identifier', normalized]])
     redirect(`/login?error=${result.blocked ? 'password_locked' : 'invalid'}&role=${loginRole === 'admin' ? 'admin' : loginRole === 'teacher' ? 'teacher' : 'student'}`)
   }

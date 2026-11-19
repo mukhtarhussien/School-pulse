@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation'
+import { connection } from 'next/server'
 import { and, desc, eq, gt, isNull, or } from 'drizzle-orm'
 import { getCurrentUser } from '@/lib/auth'
 import { requireDb } from '@/db'
@@ -13,6 +14,7 @@ const date = (value: Date | null) => value ? new Intl.DateTimeFormat('ar-IQ', { 
 export function generateStaticParams() { return sections.map(section => ({ section })) }
 
 export default async function StudentSectionPage({ params }: PageProps<'/[section]'>) {
+  await connection()
   const { section } = await params
   if (!sections.includes(section)) notFound()
   const user = await getCurrentUser()
