@@ -7,12 +7,16 @@ import {
   regenerateRecoveryCodesAction,
 } from '@/app/admin/actions'
 
-type State = { ok?: boolean; error?: string; recoveryCodes?: string[] }
+type State =
+  | { ok: false; error: string; recoveryCodes?: string[] }
+  | { ok: true; error?: never; recoveryCodes?: string[] }
+
+const initialState: State = { ok: true }
 
 export default function TotpManagement({ mode }: { mode: 'setup' | 'manage' }) {
-  const [confirmState, confirmAction, confirming] = useActionState(confirmTotpSetupAction, {} as State)
-  const [regenState, regenAction, regenerating] = useActionState(regenerateRecoveryCodesAction, {} as State)
-  const [disableState, disableAction, disabling] = useActionState(disableTotpAction, {} as State)
+  const [confirmState, confirmAction, confirming] = useActionState(confirmTotpSetupAction, initialState)
+  const [regenState, regenAction, regenerating] = useActionState(regenerateRecoveryCodesAction, initialState)
+  const [disableState, disableAction, disabling] = useActionState(disableTotpAction, initialState)
   const recoveryCodes = confirmState.recoveryCodes || regenState.recoveryCodes
 
   return <div style={{marginTop:18}}>

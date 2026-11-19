@@ -34,11 +34,9 @@ const refresh = async (paths: string[] = ['/admin']) => {
 }
 const defaultSchoolId = async (requestedSchoolId?: string) => (await requireSchoolManager(requestedSchoolId)).schoolId
 
-type TotpActionState = {
-  ok?: boolean
-  error?: string
-  recoveryCodes?: string[]
-}
+type TotpActionState =
+  | { ok: false; error: string; recoveryCodes?: string[] }
+  | { ok: true; error?: never; recoveryCodes?: string[] }
 
 export async function beginTotpSetupAction() {
   const admin = await guardAdmin({ allowUnconfigured: true })

@@ -33,7 +33,7 @@ export async function submitRegistrationAction(fd: FormData) {
   const requestedRole = request.requestedRole === 'teacher' ? 'teacher' : 'student'
   const registrationError = (reason: string) => redirect(`/register?method=google&role=${requestedRole}&error=${reason}&invite=${encodeURIComponent(inviteCode)}`)
   const invite = await inspectInvite(inviteCode, requestedRole)
-  if (!invite) registrationError('invite')
+  if (!invite) redirect(`/register?method=google&role=${requestedRole}&error=invite&invite=${encodeURIComponent(inviteCode)}`)
 
   const flood = await isRequestFlooded([
     ['google', request.googleSubject],
