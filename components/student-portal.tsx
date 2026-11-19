@@ -20,7 +20,7 @@ const grades = [['الرياضيات', 'اختبار الوحدة الثانية
 const assignments = [['الرياضيات', 'حل تمارين صفحة ٤٢', 'اليوم · ٨:٠٠ م', 'قريب'], ['العلوم', 'ملخص الجهاز الهضمي', 'الخميس · ١٠:٠٠ ص', 'قيد الإنجاز'], ['اللغة العربية', 'قراءة قصة قصيرة', 'الأحد القادم', 'تم التسليم']]
 const agenda = [['٨:٠٠', 'الرياضيات', 'قاعة ١٢'], ['٩:٠٠', 'اللغة العربية', 'قاعة ٨'], ['١٠:٠٠', 'العلوم', 'مختبر العلوم'], ['١١:٠٠', 'اللغة الإنكليزية', 'قاعة ١٠']]
 
-export function StudentPortal({ section, preview, initialLocale, socialEnabled, socialAudience, children }: { section: string; preview: boolean; initialLocale: Locale; socialEnabled: boolean; socialAudience: 'contacts' | 'school' | 'platform'; children: React.ReactNode }) {
+export function StudentPortal({ preview, initialLocale, socialEnabled, socialAudience, children }: { preview: boolean; initialLocale: Locale; socialEnabled: boolean; socialAudience: 'contacts' | 'school' | 'platform'; children: React.ReactNode }) {
   const pathname = usePathname()
   const [locale, setLocale] = useState<Locale>(initialLocale)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -28,7 +28,10 @@ export function StudentPortal({ section, preview, initialLocale, socialEnabled, 
   const [now, setNow] = useState<Date | null>(null)
   const rtl = locale !== 'en'
   const title = pathname === '/community' ? (locale === 'en' ? 'Community' : 'المجتمع') : t(locale, titles[pathname] ?? 'home')
-  useEffect(() => setMenuOpen(false), [pathname])
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setMenuOpen(false))
+    return () => window.cancelAnimationFrame(frame)
+  }, [pathname])
   useEffect(() => {
     const media = window.matchMedia('(min-width: 1101px)')
     const closeOnDesktop = () => { if (media.matches) setMenuOpen(false) }
