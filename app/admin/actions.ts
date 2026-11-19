@@ -61,7 +61,7 @@ export async function beginTotpSetupAction() {
 export async function confirmTotpSetupAction(
   _state: TotpActionState,
   fd: FormData
-): Promise<TotpActionState> {
+) {
   const admin = await guardAdmin({ allowUnconfigured: true })
   const code = str(fd, 'code')
   const encrypted = admin.twoFactorSecretEncrypted
@@ -104,7 +104,7 @@ export async function confirmTotpSetupAction(
 export async function disableTotpAction(
   _state: TotpActionState,
   fd: FormData
-): Promise<TotpActionState> {
+) {
   const admin = await guardAdmin({ allowUnconfigured: true })
   const password = str(fd, 'password')
   const code = str(fd, 'code')
@@ -141,7 +141,7 @@ export async function disableTotpAction(
 export async function regenerateRecoveryCodesAction(
   _state: TotpActionState,
   fd: FormData
-): Promise<TotpActionState> {
+) {
   const admin = await guardAdmin({ allowUnconfigured: true })
   const password = str(fd, 'password')
   const code = str(fd, 'code')
@@ -336,11 +336,6 @@ async function createUser(
 
   const db = requireDb()
   const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
-  const classId = role === 'student' ? str(fd, 'classId') : ''
-  if (role === 'student') {
-    const [classRow] = await db.select({ id: classes.id }).from(classes).where(and(eq(classes.id, classId), eq(classes.schoolId, schoolId))).limit(1)
-    if (!classRow) throw new Error('INVALID_CLASS_FOR_SCHOOL')
-  }
 
   const [user] = await db
     .insert(users)
@@ -353,7 +348,7 @@ async function createUser(
       role,
       studentNumber: role === 'student' ? str(fd, 'code') : null,
       phone: str(fd, 'phone') || null,
-      classId: role === 'student' ? classId : null,
+      classId: role === 'student' ? str(fd, 'classId') || null : null,
     })
     .returning({ id: users.id })
 
@@ -467,14 +462,12 @@ export async function assignTeacherAction(fd: FormData) {
 export async function createAssessmentAction(fd: FormData) {
   await guardAdmin()
   const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
-  const type = str(fd, 'type')
-  if (!['exam', 'quiz', 'assignment', 'project', 'participation'].includes(type)) throw new Error('INVALID_ASSESSMENT_TYPE')
 
   await requireDb().insert(assessments).values({
     schoolId,
     titleAr: str(fd, 'titleAr'),
     titleEn: str(fd, 'titleEn'),
-    type: type as 'exam' | 'quiz' | 'assignment' | 'project' | 'participation',
+    type: str(fd, 'type') as any,
     subjectId: str(fd, 'subjectId'),
     classId: str(fd, 'classId'),
     examOrder: fd.get('examOrder') ? num(fd, 'examOrder') : null,
@@ -606,8 +599,6 @@ export async function createAnnouncementAction(fd: FormData) {
   const admin = await guardAdmin()
   const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
   const published = bool(fd, 'published')
-  const audience = str(fd, 'audience') || 'all'
-  if (!['all', 'students', 'teachers', 'admins', 'class'].includes(audience)) throw new Error('INVALID_ANNOUNCEMENT_AUDIENCE')
 
   await requireDb().insert(announcements).values({
     schoolId,
@@ -615,7 +606,7 @@ export async function createAnnouncementAction(fd: FormData) {
     titleEn: str(fd, 'titleEn'),
     bodyAr: str(fd, 'bodyAr'),
     bodyEn: str(fd, 'bodyEn'),
-    audience: audience as 'all' | 'students' | 'teachers' | 'admins' | 'class',
+    audience: str(fd, 'audience') as any,
     classId: str(fd, 'classId') || null,
     published,
     publishedAt: published ? new Date() : null,
@@ -703,8 +694,6 @@ export async function createNotificationAction(fd: FormData) {
 export async function createFileAction(fd: FormData) {
   const admin = await guardAdmin()
   const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
-  const visibility = str(fd, 'visibility') || 'all'
-  if (!['all', 'students', 'teachers', 'admins', 'class'].includes(visibility)) throw new Error('INVALID_FILE_VISIBILITY')
 
   await requireDb().insert(files).values({
     schoolId,
@@ -714,7 +703,7 @@ export async function createFileAction(fd: FormData) {
     mimeType: str(fd, 'mimeType') || null,
     sizeBytes: fd.get('sizeBytes') ? num(fd, 'sizeBytes') : null,
     folder: str(fd, 'folder') || null,
-    visibility: visibility as 'all' | 'students' | 'teachers' | 'admins' | 'class',
+    visibility: str(fd, 'visibility') as any,
   })
 
   await refresh(['/admin', '/uploads'])
@@ -743,14 +732,12 @@ export async function createLocationAction(fd: FormData) {
 export async function createAttendanceAction(fd: FormData) {
   const admin = await guardAdmin()
   const schoolId = await defaultSchoolId(str(fd, 'schoolId') || undefined)
-  const status = str(fd, 'status')
-  if (!['present', 'late', 'absent', 'excused'].includes(status)) throw new Error('INVALID_ATTENDANCE_STATUS')
 
   await requireDb().insert(attendanceRecords).values({
     schoolId,
     studentId: str(fd, 'studentId'),
     date: new Date(str(fd, 'date')),
-    status: status as 'present' | 'late' | 'absent' | 'excused',
+    status: str(fd, 'status') as any,
     note: str(fd, 'note') || null,
     recordedBy: admin.id,
   })
@@ -815,7 +802,7 @@ export async function sendAnnouncementNotificationAction(
       ? await db
           .select({ id: users.id })
           .from(users)
-          .where(eq(users.role, target === 'students' ? 'student' : 'teacher'))
+          .where(eq(users.role, target as any))
       : await db
           .select({ id: users.id })
           .from(users)

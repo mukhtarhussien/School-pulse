@@ -137,6 +137,8 @@ export const classes = pgTable(
 export type UserPreferences = {
   notificationsMuted?: boolean
   blockedUserIds?: string[]
+  followedUserIds?: string[]
+  ignoredUserIds?: string[]
   profilePhotoKey?: string
   language?: 'ar' | 'ckb' | 'en'
   socialEnabled?: boolean
@@ -1559,6 +1561,26 @@ export const authChallenges =
     }
   )
 
+export const platformReports = pgTable(
+  'platform_reports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reporterId: uuid('reporter_id').references(() => users.id, { onDelete: 'set null' }),
+    category: varchar('category', { length: 40 }).notNull(),
+    subject: varchar('subject', { length: 160 }).notNull(),
+    message: text('message').notNull(),
+    status: varchar('status', { length: 20 }).default('open').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    statusCheck: check('platform_reports_status_check', sql`${t.status} in ('open', 'reviewing', 'resolved')`),
+    categoryCheck: check('platform_reports_category_check', sql`${t.category} in ('bug', 'abuse', 'suggestion', 'other')`),
+    inboxIdx: index('platform_reports_inbox_idx').on(t.status, t.createdAt),
+    reporterIdx: index('platform_reports_reporter_idx').on(t.reporterId, t.createdAt),
+  })
+)
+
 export const sessions = pgTable(
   'sessions',
   {
@@ -1590,6 +1612,8 @@ export const sessions = pgTable(
         withTimezone: true,
       }
     ).notNull(),
+
+    authMethod: varchar('auth_method', { length: 20 }).default('password').notNull(),
 
     createdAt: timestamp(
       'created_at',

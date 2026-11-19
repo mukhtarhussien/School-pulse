@@ -62,3 +62,9 @@ export async function cancelTwoFactorAction() {
   await clearTwoFactorChallenge()
   redirect('/login')
 }
+
+export async function logoutAction() {
+  const { clearSession } = await import('@/lib/auth')
+  await clearSession()
+  redirect('/login')
+}

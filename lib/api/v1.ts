@@ -56,10 +56,10 @@ export function safeUser(user: User, baseUrl = process.env.NEXT_PUBLIC_APP_URL?.
   }
 }
 
-export async function createApiSession(userId: string) {
+export async function createApiSession(userId: string, authMethod: 'password' | 'two_factor' = 'password') {
   const token = crypto.randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400000)
-  await requireDb().insert(sessions).values({ tokenHash: hashToken(token), userId, expiresAt })
+  await requireDb().insert(sessions).values({ tokenHash: hashToken(token), userId, expiresAt, authMethod })
   return { token, expiresAt }
 }
 
@@ -67,7 +67,7 @@ export async function getApiSession(request: Request) {
   const authorization = request.headers.get('authorization') || ''
   const match = /^Bearer\s+([a-f0-9]{64})$/i.exec(authorization)
   if (!match) return null
-  const [result] = await requireDb().select({ session: sessions, user: users })
+  const [result] = await requireDb().select({ session: sessions, user: users, authMethod: sessions.authMethod })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .leftJoin(schools, eq(schools.id, users.schoolId))

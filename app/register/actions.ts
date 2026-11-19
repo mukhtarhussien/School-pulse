@@ -31,8 +31,9 @@ export async function submitRegistrationAction(fd: FormData) {
   const subjectId = value(fd, 'subjectId')
   const inviteCode = value(fd, 'inviteCode')
   const requestedRole = request.requestedRole === 'teacher' ? 'teacher' : 'student'
+  const registrationError = (reason: string) => redirect(`/register?method=google&role=${requestedRole}&error=${reason}&invite=${encodeURIComponent(inviteCode)}`)
   const invite = await inspectInvite(inviteCode, requestedRole)
-  if (!invite) redirect(`/register?role=${requestedRole}&error=invite`)
+  if (!invite) registrationError('invite')
 
   const flood = await isRequestFlooded([
     ['google', request.googleSubject],
@@ -40,42 +41,42 @@ export async function submitRegistrationAction(fd: FormData) {
     ['phone', phone],
     ['registration-ip', await getClientIp()],
   ])
-  if (flood.blocked) redirect('/register?error=rate_limited')
-  if (!isValidTripleName(fullName)) redirect('/register?error=name')
-  if (requestedRole === 'student' && !validBirthDate(birthDate)) redirect('/register?error=birth_date')
-  if (!isValidIraqiPhone(phone)) redirect('/register?error=phone')
-  if (rawUsername && !/^[a-z0-9._-]{5,32}$/.test(rawUsername)) redirect(`/register?role=${requestedRole}&error=username`)
+  if (flood.blocked) registrationError('rate_limited')
+  if (!isValidTripleName(fullName)) registrationError('name')
+  if (requestedRole === 'student' && !validBirthDate(birthDate)) registrationError('birth_date')
+  if (!isValidIraqiPhone(phone)) registrationError('phone')
+  if (rawUsername && !/^[a-z0-9._-]{5,32}$/.test(rawUsername)) registrationError('username')
 
   const database = requireDb()
   if (requestedRole === 'teacher') {
     const [subject] = await database.select({ id: subjects.id }).from(subjects).where(and(eq(subjects.id, subjectId), eq(subjects.schoolId, invite.schoolId))).limit(1)
-    if (!subject) redirect('/register?role=teacher&error=subject')
+    if (!subject) registrationError('subject')
   } else {
     const [classRow] = await database.select({ id: classes.id }).from(classes).where(and(eq(classes.id, classId), eq(classes.schoolId, invite.schoolId))).limit(1)
-    if (!classRow) redirect('/register?error=class')
+    if (!classRow) registrationError('class')
   }
 
   const [existingPhone] = await database.select({ id: users.id }).from(users).where(eq(users.phone, phone)).limit(1)
-  if (existingPhone) redirect(`/register?role=${requestedRole}&error=phone_taken`)
+  if (existingPhone) registrationError('phone_taken')
   if (rawUsername) {
     const [existingUsername] = await database.select({ id: users.id }).from(users).where(eq(users.username, rawUsername)).limit(1)
-    if (existingUsername) redirect(`/register?role=${requestedRole}&error=username_taken`)
+    if (existingUsername) registrationError('username_taken')
     const [pendingUsername] = await database.select({ id: registrationRequests.id }).from(registrationRequests)
       .where(and(eq(registrationRequests.username, rawUsername), eq(registrationRequests.status, 'pending'))).limit(1)
-    if (pendingUsername) redirect(`/register?role=${requestedRole}&error=username_taken`)
+    if (pendingUsername) registrationError('username_taken')
   }
   const [duplicatePhone] = await database.select({ id: registrationRequests.id }).from(registrationRequests)
     .where(and(eq(registrationRequests.phone, phone), eq(registrationRequests.status, 'pending'))).limit(1)
-  if (duplicatePhone) redirect(`/register?role=${requestedRole}&error=phone_pending`)
+  if (duplicatePhone) registrationError('phone_pending')
 
-  if (!await consumeInvite(invite.id)) redirect(`/register?role=${requestedRole}&error=invite`)
+  if (!await consumeInvite(invite.id)) registrationError('invite')
   await database.update(registrationRequests).set({
     schoolId: invite.schoolId,
     inviteId: invite.id,
     requestedRole,
     username: rawUsername || null,
     fullName,
-    birthDate,
+    birthDate: requestedRole === 'student' ? birthDate : null,
     phone,
     classId: requestedRole === 'student' ? classId : null,
     subjectId: requestedRole === 'teacher' ? subjectId : null,
