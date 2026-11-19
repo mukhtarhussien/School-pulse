@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import { headers, cookies } from "next/headers";
 import { getCurrentUser } from "@/lib/auth";
 import { LOCALE_COOKIE, localeFromGeo, localeInfo, isLocale } from "@/lib/locale";
@@ -14,6 +15,7 @@ export const metadata: Metadata = {
 export const instant = false;
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  await connection();
   const [requestHeaders, cookieStore, user] = await Promise.all([headers(), cookies(), getCurrentUser()]);
   const saved = cookieStore.get(LOCALE_COOKIE)?.value;
   const locale = isLocale(saved) ? saved : isLocale(user?.preferences?.language) ? user.preferences.language : localeFromGeo(
