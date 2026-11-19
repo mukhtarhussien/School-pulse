@@ -4,12 +4,13 @@ import { cookies } from 'next/headers'
 import { and, desc, eq } from 'drizzle-orm'
 import { requireDb } from '@/db'
 import { registrationRequests, users } from '@/db/schema'
-import { createSession } from '@/lib/auth'
+import { clearSession, createSession } from '@/lib/auth'
 
 const STATE_COOKIE = 'school_google_state'
 const VERIFIER_COOKIE = 'school_google_verifier'
 const ROLE_COOKIE = 'school_google_role'
 const ADMIN_LOGIN_COOKIE = 'school_admin_google_login'
+const PLATFORM_MANAGER_COOKIE = 'school_platform_manager_login'
 const REGISTRATION_COOKIE = 'school_registration_state'
 const COOKIE_MAX_AGE = 10 * 60
 
@@ -90,6 +91,21 @@ export async function beginGoogleOAuth(origin: string, requestedRole: 'student' 
   store.set(VERIFIER_COOKIE, signed(verifier), cookieOptions('/api/auth/google/callback'))
   store.set(ROLE_COOKIE, signed(requestedRole), cookieOptions('/api/auth/google/callback'))
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
+}
+
+export async function beginPlatformManagerGoogleOAuth(origin: string) {
+  await clearSession()
+  const url = await beginGoogleOAuth(origin, 'admin')
+  const store = await cookies()
+  store.set(PLATFORM_MANAGER_COOKIE, signed('1'), cookieOptions('/api/auth/google/callback'))
+  return url
+}
+
+export async function consumePlatformManagerGoogleFlow() {
+  const store = await cookies()
+  const isManagerFlow = verifySigned(store.get(PLATFORM_MANAGER_COOKIE)?.value) === '1'
+  store.delete(PLATFORM_MANAGER_COOKIE)
+  return isManagerFlow
 }
 
 export async function readGoogleOAuthState() {
@@ -196,7 +212,7 @@ export async function resolveGoogleLogin(profile: GoogleProfile, requestedRole: 
     if (!googleUser.isActive) return { kind: 'inactive' as const }
     if (googleUser.role === 'admin') return requestedRole === 'admin' ? { kind: 'admin-password' as const, userId: googleUser.id } : { kind: 'wrong-role' as const }
     if (requestedRole === 'admin' || googleUser.role !== requestedRole) return { kind: 'wrong-role' as const }
-    await createSession(googleUser.id)
+    await createSession(googleUser.id, 'google')
     return { kind: 'signed-in' as const }
   }
 
@@ -210,7 +226,7 @@ export async function resolveGoogleLogin(profile: GoogleProfile, requestedRole: 
     }
     if (requestedRole === 'admin' || emailUser.role !== requestedRole) return { kind: 'wrong-role' as const }
     await database.update(users).set({ googleSubject: profile.sub, updatedAt: new Date() }).where(eq(users.id, emailUser.id))
-    await createSession(emailUser.id)
+    await createSession(emailUser.id, 'google')
     return { kind: 'signed-in' as const }
   }
 

@@ -17,6 +17,7 @@ export async function GET() {
       content: '/api/v1/content',
       community: '/api/v1/community',
       messages: '/api/v1/messages',
+      reports: '/api/v1/reports',
       notifications: '/api/v1/notifications',
       admin: '/api/v1/admin',
       registration: '/api/v1/register',

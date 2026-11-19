@@ -74,9 +74,11 @@ The server verifies the token with Google and checks the audience against `GOOGL
 - `GET /api/v1/content` returns published rules, campus locations, and assessment progress comparisons.
 - `GET /api/v1/community` returns published posts, comments, vote totals, and the current user's vote. `POST /api/v1/community` creates posts, comments, and votes.
 - `GET /api/v1/messages` returns available contacts, conversations, requests, and blocked users. `POST /api/v1/messages` sends or responds to requests and blocks/unblocks accounts.
+- `POST /api/v1/reports` sends a report to the platform management inbox.
 - `PATCH /api/v1/me` updates the current account name, phone number, and appearance preferences. `PATCH /api/v1/notifications` stores the notification mute preference.
 - Admin accounts can use `GET` and `POST /api/v1/admin` for dashboard data and school management actions.
 - `POST /api/v1/auth/logout` revokes the current access token.
+- `POST /api/v1/reports` sends a platform report for the signed-in user. The JSON body is `{ "category": "bug", "subject": "...", "message": "..." }`; category is `bug`, `abuse`, `suggestion`, or `other`.
 
 Only the signed-in user's own grades, attendance, assignment submissions, and notifications are returned. The API never serializes password hashes, recovery-code hashes, or encrypted two-factor secrets.
 

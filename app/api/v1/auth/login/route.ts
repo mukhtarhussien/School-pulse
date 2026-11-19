@@ -41,10 +41,7 @@ export async function POST(request: Request) {
   }
 
   await clearPasswordFailures(identifiers)
-  if (user.role === 'admin' && !user.twoFactorEnabled) {
-    return apiError('admin_two_factor_required', 'فعّل المصادقة الثنائية من بوابة الويب قبل استخدام حساب الإدارة في التطبيق.', 403)
-  }
-  if (user.role === 'admin') {
+  if (user.role === 'admin' && user.twoFactorEnabled) {
     const challenge = await createApiChallenge(user.id)
     return apiJson({ requiresTwoFactor: true, challengeToken: challenge.token, expiresAt: challenge.expiresAt })
   }

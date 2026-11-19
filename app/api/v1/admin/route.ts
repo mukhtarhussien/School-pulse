@@ -1,6 +1,5 @@
 import crypto from 'node:crypto'
 import { and, desc, eq, sql } from 'drizzle-orm'
-import type { AnyPgTable } from 'drizzle-orm/pg-core'
 import { requireDb } from '@/db'
 import {
   announcements, assessments, assignments, attendanceRecords, calendarEvents, classes,
@@ -13,13 +12,13 @@ import { apiError, apiJson, getApiSession, readJson } from '@/lib/api/v1'
 const str = (body: Record<string, unknown>, key: string) => String(body[key] ?? '').trim()
 const num = (body: Record<string, unknown>, key: string, fallback = 0) => Number.isFinite(Number(body[key])) ? Number(body[key]) : fallback
 const date = (body: Record<string, unknown>, key: string) => { const value = str(body, key); const parsed = value ? new Date(value) : null; return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null }
-const count = async (table: AnyPgTable) => (await requireDb().select({ value: sql<number>`count(*)::int` }).from(table))[0]?.value ?? 0
+const count = async (table: any) => (await requireDb().select({ value: sql<number>`count(*)::int` }).from(table))[0]?.value ?? 0
 
 async function adminSession(request: Request) {
   const auth = await getApiSession(request)
   if (!auth) return { error: apiError('unauthorized', 'سجّل الدخول أولًا.', 401) }
   if (auth.user.role !== 'admin') return { error: apiError('forbidden', 'هذه الصفحة متاحة للإدارة فقط.', 403) }
-  if (!auth.user.twoFactorEnabled) return { error: apiError('two_factor_required', 'فعّل المصادقة الثنائية قبل استخدام واجهة الإدارة.', 403) }
+  if (!auth.user.twoFactorEnabled || auth.authMethod !== 'two_factor') return { error: apiError('two_factor_required', 'سجّل الدخول بالمصادقة الثنائية قبل استخدام واجهة إدارة المنصة.', 403) }
   return { auth }
 }
 
@@ -27,9 +26,11 @@ export async function GET(request: Request) {
   const gate = await adminSession(request)
   if (gate.error) return gate.error
   const db = requireDb()
-  const [countValues, studentCount, recentUsers, classRows, subjectRows, students, teacherRows, assessmentRows, pendingRegistrations, postRows, announcementRows] = await Promise.all([
-    Promise.all([users, teachers, classes, subjects, assessments, grades, assignments, announcements, calendarEvents, files, notifications, communityPosts, rules, attendanceRecords, schoolLocations].map(count)),
-    db.select({ value: sql<number>`count(*)::int` }).from(users).where(eq(users.role, 'student')).then(rows => rows[0]?.value ?? 0),
+  const [stats, recentUsers, classRows, subjectRows, students, teacherRows, assessmentRows, pendingRegistrations, postRows, announcementRows] = await Promise.all([
+    Promise.all([
+      Promise.all([users, teachers, classes, subjects, assessments, grades, assignments, announcements, calendarEvents, files, notifications, communityPosts, rules, attendanceRecords, schoolLocations].map(count)),
+      db.select({ value: sql<number>`count(*)::int` }).from(users).where(eq(users.role, 'student')).then(rows => rows[0]?.value ?? 0),
+    ]),
     db.select({ id: users.id, name: users.fullNameAr, email: users.email, role: users.role, active: users.isActive }).from(users).orderBy(desc(users.createdAt)).limit(25),
     db.select({ id: classes.id, nameAr: classes.nameAr, nameEn: classes.nameEn, gradeLevel: classes.gradeLevel, section: classes.section }).from(classes).orderBy(desc(classes.createdAt)).limit(100),
     db.select({ id: subjects.id, code: subjects.code, nameAr: subjects.nameAr, nameEn: subjects.nameEn }).from(subjects).orderBy(desc(subjects.createdAt)).limit(100),
@@ -40,7 +41,8 @@ export async function GET(request: Request) {
     db.select({ id: communityPosts.id, body: communityPosts.body, published: communityPosts.published, pinned: communityPosts.pinned, author: users.fullNameAr }).from(communityPosts).innerJoin(users, eq(users.id, communityPosts.authorId)).orderBy(desc(communityPosts.createdAt)).limit(40),
     db.select({ id: announcements.id, titleAr: announcements.titleAr, published: announcements.published, createdAt: announcements.createdAt }).from(announcements).orderBy(desc(announcements.createdAt)).limit(30),
   ])
-  return apiJson({ stats: { users: countValues[0], teachers: countValues[1], students: studentCount, classes: countValues[2], subjects: countValues[3], assessments: countValues[4], grades: countValues[5], assignments: countValues[6], announcements: countValues[7], events: countValues[8], files: countValues[9], notifications: countValues[10], posts: countValues[11], rules: countValues[12], attendance: countValues[13], locations: countValues[14], registrations: pendingRegistrations.length }, users: recentUsers, classes: classRows, subjects: subjectRows, students, teachers: teacherRows, assessments: assessmentRows, pendingRegistrations, posts: postRows, announcements: announcementRows })
+  const counts = stats[0]
+  return apiJson({ stats: { users: counts[0], teachers: counts[1], students: stats[1], classes: counts[2], subjects: counts[3], assessments: counts[4], grades: counts[5], assignments: counts[6], announcements: counts[7], events: counts[8], files: counts[9], notifications: counts[10], posts: counts[11], rules: counts[12], attendance: counts[13], locations: counts[14], registrations: pendingRegistrations.length }, users: recentUsers, classes: classRows, subjects: subjectRows, students, teachers: teacherRows, assessments: assessmentRows, pendingRegistrations, posts: postRows, announcements: announcementRows })
 }
 
 export async function POST(request: Request) {

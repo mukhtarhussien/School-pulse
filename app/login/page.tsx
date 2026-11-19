@@ -8,6 +8,5 @@ export default async function LoginPage({ searchParams }: PageProps<'/login'>) {
   const candidate = typeof query.role === 'string' ? query.role : ''
   const error = typeof query.error === 'string' ? query.error : ''
   const role: Role = candidate === 'teacher' || candidate === 'admin' ? candidate : 'student'
-  const googleVerified = query.google === 'verified'
-  return <LoginExperience initialRole={role} error={error} googleVerified={googleVerified}/>
+  return <LoginExperience initialRole={role} error={error}/>
 }

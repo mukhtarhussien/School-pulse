@@ -1,70 +1,41 @@
-# School Platform
+# Schools Pulse
 
-بوابة مدرسية ثنائية اللغة (العربية والإنكليزية) مبنية باستخدام Next.js وReact وPostgreSQL عبر Neon. تتضمن صفحات الحسابات والدرجات والواجبات والحضور والإعلانات والرسائل والإشعارات ولوحة الإدارة.
+Next.js school portal starter with the backend from the existing School-pulse project: Neon PostgreSQL, Drizzle ORM, session authentication, admin and student APIs, Google sign-in support, file storage, and the Flutter API.
 
-## المتطلبات
+## Local setup
 
-- Node.js 20.9 أو أحدث وnpm.
-- قاعدة PostgreSQL متوافقة مع Neon.
-
-## التشغيل محليًا
-
-1. ثبّت الاعتماديات وأنشئ ملف الإعدادات المحلي:
+1. Install dependencies and create a local environment file:
 
    ```bash
    npm ci
    cp .env.example .env.local
    ```
 
-2. عدّل `.env.local`، وأدخل على الأقل:
+2. Set at least `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` in `.env.local`. Set `NEXT_PUBLIC_APP_URL` to the local or deployed site URL. Generate a session secret with `openssl rand -hex 32`.
 
-   - `DATABASE_URL`: رابط اتصال PostgreSQL.
-   - `SESSION_SECRET`: سر عشوائي للجلسات؛ أنشئه مثلًا عبر `openssl rand -hex 32`.
-   - `ADMIN_EMAIL` و`ADMIN_PASSWORD`: بيانات حساب المدير الأول.
-   - `NEXT_PUBLIC_APP_URL`: عنوان الموقع، مثل `http://localhost:3000` محليًا.
-
-3. جهّز متغيرات قاعدة البيانات والمدير في الطرفية، ثم طبّق المخطط وأنشئ حساب المدير:
+3. Apply the Drizzle schema and create the initial administrator:
 
    ```bash
-   export DATABASE_URL='رابط قاعدة البيانات'
-   export ADMIN_EMAIL='admin@example.com'
-   export ADMIN_PASSWORD='كلمة مرور قوية'
    npm run db:push
-   node scripts/bootstrap-admin.mjs
+   npm run admin:bootstrap
    ```
 
-   على قاعدة موجودة، ملف `migrations/20261009_user_preferences.sql` يضيف عمود تفضيلات المستخدم عند الحاجة. شغّل SQL يدويًا على قاعدة البيانات القائمة إذا كان العمود غير موجود؛ الاستعلام آمن عند تكرار تشغيله.
-
-4. ابدأ خادم التطوير:
+4. Start the app:
 
    ```bash
    npm run dev
    ```
 
-   ثم افتح `http://localhost:3000`.
+## Optional integrations
 
-## إعدادات اختيارية
+- Google sign-in needs `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` configured in Google OAuth and the app environment.
+- Android app uploads need `AWS_ENDPOINT_URL_S3`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` for an S3-compatible store.
+- The Flutter API is documented in [docs/flutter-api.md](docs/flutter-api.md).
+- Never commit `.env.local` or expose secrets through `NEXT_PUBLIC_*` variables.
 
-- **تسجيل الدخول عبر Google:** اضبط `GOOGLE_CLIENT_ID` و`GOOGLE_CLIENT_SECRET` و`GOOGLE_REDIRECT_URI` في مزوّد OAuth وفي البيئة.
-- **رفع تطبيق Android:** اضبط `AWS_ENDPOINT_URL_S3` و`AWS_ACCESS_KEY_ID` و`AWS_SECRET_ACCESS_KEY` و`AWS_REGION` لمخزن S3-compatible، ثم أعد النشر. يلزم أن تسمح سياسة CORS في المخزن بطلبات الرفع من نطاق الموقع.
-- لا تضع أسرارًا في Git أو في متغيرات `NEXT_PUBLIC_*`.
+## Database commands
 
-## CSS
-
-يعمل `app/globals.css` كمدخل مرتب فقط؛ تفاصيل التنسيق موزعة في `app/styles/` حسب الوظيفة: `shell.css` للتنقل والإطار، `dashboard.css` و`dashboard-overrides.css` و`calendar.css` للصفحات الرئيسية، `themes.css` للسمات، وملفات مستقلة للحساب والرسائل والإشعارات والإدارة والدخول والرفع والحركة. ترتيب الاستيراد في `globals.css` مقصود للحفاظ على الـcascade. قواعد `mobile-360.css` تضبط الواجهة للشاشات الضيقة، ومنها عرض 360 CSS px. أضف تنسيقات كل صفحة إلى ملف وظيفتها، واستخدم `shared-overrides.css` فقط للقواعد المشتركة.
-
-## أوامر المشروع
-
-- `npm run dev` — خادم التطوير.
-- `npm run build` — بناء الإنتاج.
-- `npm run start` — تشغيل نسخة الإنتاج بعد البناء.
-- `npm run db:push` — مزامنة مخطط Drizzle مع قاعدة البيانات.
-- `npm run admin:bootstrap` — إنشاء/تحديث حساب المدير؛ يتطلب `DATABASE_URL` و`ADMIN_EMAIL` و`ADMIN_PASSWORD` في البيئة.
-
-## Flutter API
-
-The native Flutter app can use the versioned JSON API at `/api/v1`. See [docs/flutter-api.md](docs/flutter-api.md) for login, dashboard, asset, and profile-photo request formats.
-
-## تطبيق Flutter
-
-يوجد مشروع التطبيق الأصلي في `flutter_app/`. تعليمات إنشاء ملفات Android/iOS وتشغيل التطبيق موجودة في [flutter_app/README.md](flutter_app/README.md).
+- `npm run db:generate` generates a migration from the Drizzle schema.
+- `npm run db:migrate` applies generated Drizzle migrations.
+- `npm run db:migrate:sql` applies the hand-written SQL files in `migrations/` (including platform report storage and Google session markers).
+- `npm run db:push` syncs the schema directly to the configured PostgreSQL database.

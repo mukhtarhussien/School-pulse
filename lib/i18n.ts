@@ -41,8 +41,6 @@ const words = {
   usernameOrEmail: { ar: 'اسم المستخدم أو البريد أو رقم الهاتف', ckb: 'ناوی بەکارهێنەر یان ئیمەیڵ یان ژمارەی مۆبایل', en: 'Username, email, or phone' },
   password: { ar: 'كلمة المرور', ckb: 'وشەی نهێنی', en: 'Password' },
   continue: { ar: 'متابعة', ckb: 'بەردەوامبوون', en: 'Continue' },
-  preview: { ar: 'معاينة الواجهة ببيانات تجريبية', ckb: 'بینینی ڕووکار بە زانیاریی نموونەیی', en: 'Preview with sample data' },
-  previewBanner: { ar: 'وضع المعاينة · هذه بيانات تجريبية وليست سجلات حقيقية', ckb: 'دۆخی پیشاندان · ئەم زانیارییانە نموونەیین و تۆماری ڕاستەقینە نین', en: 'Preview mode · Sample data, not real records' },
   language: { ar: 'اللغة', ckb: 'زمان', en: 'Language' },
   class: { ar: 'الصف', ckb: 'پۆل', en: 'Class' },
   studentNumber: { ar: 'الرقم الطلابي', ckb: 'ژمارەی قوتابی', en: 'Student number' },

@@ -17,6 +17,6 @@ export async function POST(request: Request) {
     )
   }
 
-  const session = await createApiSession(result.user.id)
+  const session = await createApiSession(result.user.id, 'two_factor')
   return apiJson({ accessToken: session.token, tokenType: 'Bearer', expiresAt: session.expiresAt, user: safeUser(result.user, getSiteBaseUrl(request)) })
 }

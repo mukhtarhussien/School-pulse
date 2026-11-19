@@ -56,11 +56,11 @@ function readSignedToken(value?: string) {
   return token
 }
 
-export async function createSession(userId: string) {
+export async function createSession(userId: string, authMethod: 'password' | 'google' | 'two_factor' = 'password') {
   const database = requireDb()
   const token = crypto.randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400000)
-  await database.insert(sessions).values({ tokenHash: hashToken(token), userId, expiresAt })
+  await database.insert(sessions).values({ tokenHash: hashToken(token), userId, expiresAt, authMethod })
   const store = await cookies()
   store.set(COOKIE, makeSignedToken(token), {
     httpOnly: true,
@@ -170,7 +170,7 @@ export async function verifyTwoFactorChallenge(code: string) {
       if (!recoveryCodeConsumed) return { ok: false, reason: 'expired' as const }
     }
 
-    await createSession(result.user.id)
+    await createSession(result.user.id, 'two_factor')
     return { ok: true as const, usedRecoveryCode: recoveryIndex >= 0 && !validTotp }
   }
 
@@ -181,12 +181,12 @@ export async function verifyTwoFactorChallenge(code: string) {
   return { ok: false, reason: 'invalid' as const, attemptsRemaining: MAX_CHALLENGE_ATTEMPTS - attempt.attempts }
 }
 
-export async function getCurrentUser() {
+export async function getCurrentSession() {
   if (!dbAvailable()) return null
   const store = await cookies()
   const token = readSignedToken(store.get(COOKIE)?.value)
   if (!token) return null
-  const row = await requireDb().select({ user: users }).from(sessions)
+  const row = await requireDb().select({ user: users, authMethod: sessions.authMethod }).from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .leftJoin(schools, eq(schools.id, users.schoolId))
     .where(and(
@@ -195,7 +195,11 @@ export async function getCurrentUser() {
       eq(users.isActive, true),
       or(eq(users.role, 'admin'), eq(schools.isActive, true)),
     )).limit(1)
-  return row[0]?.user ?? null
+  return row[0] ?? null
+}
+
+export async function getCurrentUser() {
+  return (await getCurrentSession())?.user ?? null
 }
 
 function dbAvailable() {
