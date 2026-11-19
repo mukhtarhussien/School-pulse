@@ -9,6 +9,7 @@ import { getRegistrationContext } from '@/lib/google'
 import { hashPassword } from '@/lib/auth'
 import { getClientIp, isRequestFlooded, isValidIraqiPhone, isValidTripleName, normalizeFullName, normalizePhone } from '@/lib/security'
 import { consumeInvite, inspectInvite } from '@/lib/invitations'
+import { recordPlatformDiagnostic } from '@/lib/diagnostics'
 
 const value = (fd: FormData, key: string) => String(fd.get(key) ?? '').trim()
 
@@ -84,6 +85,7 @@ export async function submitRegistrationAction(fd: FormData) {
     updatedAt: new Date(),
     rejectionReason: null,
   }).where(eq(registrationRequests.id, request.id))
+  await recordPlatformDiagnostic({ eventType: 'registration_submitted', actorRole: requestedRole, route: '/register', statusCode: 202, metadata: { registrationRequestId: request.id } })
 
   const admins = await database.select({ id: users.id }).from(users).where(and(eq(users.isActive, true), or(eq(users.role, 'admin'), and(eq(users.role, 'school_admin'), eq(users.schoolId, invite.schoolId)))))
   if (admins.length) {

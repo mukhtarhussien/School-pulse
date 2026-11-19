@@ -16,7 +16,7 @@ Next.js school portal starter with the backend from the existing School-pulse pr
 3. Apply the Drizzle schema and create the initial administrator:
 
    ```bash
-   npm run db:push
+   npm run db:migrate:sql
    npm run admin:bootstrap
    ```
 
@@ -37,5 +37,5 @@ Next.js school portal starter with the backend from the existing School-pulse pr
 
 - `npm run db:generate` generates a migration from the Drizzle schema.
 - `npm run db:migrate` applies generated Drizzle migrations.
-- `npm run db:migrate:sql` applies the hand-written SQL files in `migrations/` (including platform report storage and Google session markers). Run it against the production `DATABASE_URL` before deploying a release that adds database columns or tables.
+- `npm run db:migrate:sql` initializes the current schema when needed, preserves the older messaging tables under `legacy_archive`, and applies SQL migrations such as platform diagnostics. Run it against the production `DATABASE_URL` before deploying a release that adds database columns or tables. It also creates visit, account, login, and server-error diagnostics; IPs are stored as keyed hashes.
 - `npm run db:push` syncs the schema directly to the configured PostgreSQL database.

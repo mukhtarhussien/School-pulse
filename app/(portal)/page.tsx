@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { connection } from 'next/server'
 import { and, desc, eq, gt, inArray, or, sql } from 'drizzle-orm'
 import { getCurrentUser } from '@/lib/auth'
 import { requireDb } from '@/db'
@@ -6,6 +7,7 @@ import { announcements, assignments, attendanceRecords, calendarEvents, grades, 
 import { BookOpen, CalendarDays, ClipboardList, Megaphone } from 'lucide-react'
 
 export default async function HomePage() {
+  await connection()
   const user = await getCurrentUser()
   if (!user) return null
   const db = requireDb()

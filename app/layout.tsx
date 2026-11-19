@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { connection } from "next/server";
+import { Suspense } from "react";
 import { headers, cookies } from "next/headers";
 import { getCurrentUser } from "@/lib/auth";
+import { VisitTracker } from "@/components/visit-tracker";
 import { LOCALE_COOKIE, localeFromGeo, localeInfo, isLocale } from "@/lib/locale";
 import "./globals.css";
 
@@ -15,7 +16,6 @@ export const metadata: Metadata = {
 export const instant = false;
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  await connection();
   const [requestHeaders, cookieStore, user] = await Promise.all([headers(), cookies(), getCurrentUser()]);
   const saved = cookieStore.get(LOCALE_COOKIE)?.value;
   const locale = isLocale(saved) ? saved : isLocale(user?.preferences?.language) ? user.preferences.language : localeFromGeo(
@@ -24,7 +24,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const info = localeInfo[locale];
   return (
     <html lang={info.htmlLang} dir={info.dir}>
-      <body>{children}</body>
+      <body><Suspense fallback={null}><VisitTracker /></Suspense>{children}</body>
     </html>
   );
 }

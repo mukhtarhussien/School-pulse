@@ -5,6 +5,8 @@ import { and, eq, gt, lt, or, sql } from 'drizzle-orm'
 import { requireDb } from '@/db'
 import { authChallenges, schools, sessions, users } from '@/db/schema'
 import { decryptTotpSecret, hashRecoveryCode, normaliseRecoveryCode, verifyTotpCode } from '@/lib/totp'
+import { hashDiagnosticIp, recordPlatformDiagnostic } from '@/lib/diagnostics'
+import { getClientIp } from '@/lib/security'
 
 const COOKIE = 'school_pulse_session'
 const CHALLENGE_COOKIE = 'school_pulse_2fa_challenge'
@@ -61,6 +63,15 @@ export async function createSession(userId: string, authMethod: 'password' | 'go
   const token = crypto.randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400000)
   await database.insert(sessions).values({ tokenHash: hashToken(token), userId, expiresAt, authMethod })
+  const ip = await getClientIp().catch(() => null)
+  const [loggedInUser] = await database.update(users).set({
+    lastLoginAt: sql`now()`,
+    lastLoginMethod: authMethod,
+    lastLoginIpHash: hashDiagnosticIp(ip),
+    loginCount: sql`${users.loginCount} + 1`,
+    lastSeenAt: sql`now()`,
+  }).where(eq(users.id, userId)).returning({ role: users.role })
+  await recordPlatformDiagnostic({ eventType: 'auth_success', actorUserId: userId, actorRole: loggedInUser?.role ?? null, method: authMethod, statusCode: 200, ipHash: hashDiagnosticIp(ip) })
   const store = await cookies()
   store.set(COOKIE, makeSignedToken(token), {
     httpOnly: true,
