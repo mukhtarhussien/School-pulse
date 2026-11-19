@@ -34,11 +34,9 @@ const refresh = async (paths: string[] = ['/admin']) => {
 }
 const defaultSchoolId = async (requestedSchoolId?: string) => (await requireSchoolManager(requestedSchoolId)).schoolId
 
-type TotpActionState = {
-  ok?: boolean
-  error?: string
-  recoveryCodes?: string[]
-}
+type TotpActionState =
+  | { ok: false; error: string; recoveryCodes?: string[] }
+  | { ok: true; error?: never; recoveryCodes?: string[] }
 
 export async function beginTotpSetupAction() {
   const admin = await guardAdmin({ allowUnconfigured: true })
@@ -61,7 +59,7 @@ export async function beginTotpSetupAction() {
 export async function confirmTotpSetupAction(
   _state: TotpActionState,
   fd: FormData
-) {
+): Promise<TotpActionState> {
   const admin = await guardAdmin({ allowUnconfigured: true })
   const code = str(fd, 'code')
   const encrypted = admin.twoFactorSecretEncrypted
@@ -104,7 +102,7 @@ export async function confirmTotpSetupAction(
 export async function disableTotpAction(
   _state: TotpActionState,
   fd: FormData
-) {
+): Promise<TotpActionState> {
   const admin = await guardAdmin({ allowUnconfigured: true })
   const password = str(fd, 'password')
   const code = str(fd, 'code')
@@ -141,7 +139,7 @@ export async function disableTotpAction(
 export async function regenerateRecoveryCodesAction(
   _state: TotpActionState,
   fd: FormData
-) {
+): Promise<TotpActionState> {
   const admin = await guardAdmin({ allowUnconfigured: true })
   const password = str(fd, 'password')
   const code = str(fd, 'code')
