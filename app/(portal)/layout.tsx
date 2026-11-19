@@ -12,5 +12,5 @@ export default async function PortalLayout({ children }: Readonly<{ children: Re
   const savedLocale = store.get(LOCALE_COOKIE)?.value
   const locale = isLocale(savedLocale) ? savedLocale : isLocale(userLocale) ? userLocale : localeFromGeo(requestHeaders.get('x-vercel-ip-country'), requestHeaders.get('x-vercel-ip-country-region'), requestHeaders.get('x-vercel-ip-city'))
   const { StudentPortal } = await import('@/components/student-portal')
-  return <StudentPortal section="/" preview={preview} initialLocale={locale} socialEnabled={user?.preferences?.socialEnabled !== false} socialAudience={user?.preferences?.socialMessageAudience ?? 'platform'}>{children}</StudentPortal>
+  return <StudentPortal preview={preview} initialLocale={locale} socialEnabled={user?.preferences?.socialEnabled !== false} socialAudience={user?.preferences?.socialMessageAudience ?? 'platform'}>{children}</StudentPortal>
 }
