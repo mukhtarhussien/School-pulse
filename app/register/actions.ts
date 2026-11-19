@@ -42,7 +42,7 @@ export async function submitRegistrationAction(fd: FormData) {
   ])
   if (flood.blocked) redirect('/register?error=rate_limited')
   if (!isValidTripleName(fullName)) redirect('/register?error=name')
-  if (!validBirthDate(birthDate)) redirect('/register?error=birth_date')
+  if (requestedRole === 'student' && !validBirthDate(birthDate)) redirect('/register?error=birth_date')
   if (!isValidIraqiPhone(phone)) redirect('/register?error=phone')
   if (rawUsername && !/^[a-z0-9._-]{5,32}$/.test(rawUsername)) redirect(`/register?role=${requestedRole}&error=username`)
 
