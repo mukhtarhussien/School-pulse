@@ -64,14 +64,15 @@ export async function createSession(userId: string, authMethod: 'password' | 'go
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400000)
   await database.insert(sessions).values({ tokenHash: hashToken(token), userId, expiresAt, authMethod })
   const ip = await getClientIp().catch(() => null)
+  const ipHash = await hashDiagnosticIp(ip)
   const [loggedInUser] = await database.update(users).set({
     lastLoginAt: sql`now()`,
     lastLoginMethod: authMethod,
-    lastLoginIpHash: hashDiagnosticIp(ip),
+    lastLoginIpHash: ipHash,
     loginCount: sql`${users.loginCount} + 1`,
     lastSeenAt: sql`now()`,
   }).where(eq(users.id, userId)).returning({ role: users.role })
-  await recordPlatformDiagnostic({ eventType: 'auth_success', actorUserId: userId, actorRole: loggedInUser?.role ?? null, method: authMethod, statusCode: 200, ipHash: hashDiagnosticIp(ip) })
+  await recordPlatformDiagnostic({ eventType: 'auth_success', actorUserId: userId, actorRole: loggedInUser?.role ?? null, method: authMethod, statusCode: 200, ipHash })
   const store = await cookies()
   store.set(COOKIE, makeSignedToken(token), {
     httpOnly: true,

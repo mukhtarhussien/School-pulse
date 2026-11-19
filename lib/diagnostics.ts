@@ -1,5 +1,4 @@
 import 'server-only'
-import { createHmac } from 'node:crypto'
 import { requireDb } from '@/db'
 import { platformDiagnostics } from '@/db/schema'
 
@@ -21,10 +20,22 @@ export type PlatformDiagnosticInput = {
   metadata?: Record<string, unknown>
 }
 
-export function hashDiagnosticIp(ip: string | null | undefined) {
+export async function hashDiagnosticIp(ip: string | null | undefined) {
   const secret = process.env.SESSION_SECRET
   if (!ip || !secret) return null
-  return createHmac('sha256', secret).update(`diagnostic-ip:${ip}`).digest('hex')
+  try {
+    const key = await globalThis.crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    )
+    const signature = await globalThis.crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`diagnostic-ip:${ip}`))
+    return Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, '0')).join('')
+  } catch {
+    return null
+  }
 }
 
 export async function recordPlatformDiagnostic(event: PlatformDiagnosticInput) {

@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     route: path,
     method: 'GET',
     statusCode: 200,
-    ipHash: hashDiagnosticIp(ip),
+    ipHash: await hashDiagnosticIp(ip),
   })
   return new NextResponse(null, { status: 204, headers: { 'Cache-Control': 'no-store' } })
 }

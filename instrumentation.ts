@@ -35,7 +35,7 @@ export const onRequestError: Instrumentation.onRequestError = async (error, requ
     errorDigest: getDigest(error),
     message: errorCode ? 'Database request failed' : 'Server request failed',
     requestId,
-    ipHash: hashDiagnosticIp(ip),
+    ipHash: await hashDiagnosticIp(ip),
     metadata: {
       routerKind: context.routerKind,
       routeType: context.routeType,
